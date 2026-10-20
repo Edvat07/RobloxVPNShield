@@ -29,6 +29,11 @@ rem --- Ensure PyInstaller ----------------------------------------------------
     %PY% -m pip install --disable-pip-version-check -q pyinstaller || goto :fail
 )
 
+%PY% -c "import pystray, PIL" >nul 2>&1 || (
+    echo [*] Dang cai pystray, Pillow...
+    %PY% -m pip install --disable-pip-version-check -q pystray pillow || goto :fail
+)
+
 rem --- Build -----------------------------------------------------------------
 echo [*] Dang dong goi RobloxShield.exe...
 set "ICON_ARG="

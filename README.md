@@ -23,7 +23,8 @@ Nhà mạng chặn Steam theo 2 lớp: DNS bị giả mạo (kể cả khi đổ
 - Chỉ dải IP ảo đó đi vào card mạng ảo. Ở đó gói ClientHello được chia nhỏ thành nhiều TLS record để DPI không đọc được, rồi kết nối **đi thẳng** ra mạng nhà.
 - Game, voice và mọi app khác **không đi qua** sing-box → ping không đổi.
 
-Cách dùng: mở shortcut **Steam Unblock** (chấp nhận quyền Admin), đợi "Đã mở khoá Steam ✓", rồi bấm **Mở Steam**. Nếu Steam đã mở sẵn mà báo lỗi mạng, thoát hẳn Steam rồi mở lại. Đóng app = tắt.
+Cách dùng: mở shortcut **Steam Unblock** (chấp nhận quyền Admin), đợi "Đã mở khoá Steam ✓", rồi bấm **Mở Steam**. Nếu Steam đã mở sẵn mà báo lỗi mạng, thoát hẳn Steam rồi mở lại.
+Bấm X hoặc thu nhỏ cửa sổ thì app **chạy ngầm ở khay hệ thống** (góc phải thanh Taskbar) và Steam vẫn được mở khoá. Bấm vào biểu tượng để mở lại cửa sổ, chuột phải → **Thoát** để tắt hẳn.
 
 Roblox Shield cũng tự mở khoá Steam theo cách tương tự. Không chạy hai app cùng lúc: Steam Unblock sẽ tự nhường nếu thấy Roblox Shield đang chạy.
 

@@ -2,8 +2,9 @@
 Steam Unblock — gets past the ISP block on Steam without a VPN.
 
 Only connections to Steam domains pass through sing-box (fake-IP range routed into a TUN); game traffic
-never touches it, so in-game ping is unchanged. sing-box is bound to a kill-on-close Job Object: closing or
-crashing this app removes the bypass and the TUN with it.
+never touches it, so in-game ping is unchanged. sing-box is bound to a kill-on-close Job Object: quitting or
+crashing this app removes the bypass and the TUN with it. Closing or minimizing the window only hides it to
+the system tray; "Thoát" in the tray menu quits.
 """
 
 from __future__ import annotations
@@ -20,6 +21,9 @@ import winreg
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
+
+import pystray
+from PIL import Image
 
 from tunnel import SingBox, build_steam_unblock_config, host_has_ipv6, probe_steam
 from winapi import KillOnCloseJob, enable_dpi_awareness, find_processes, flush_dns_cache, is_admin, relaunch_as_admin
@@ -62,10 +66,13 @@ class App:
         self.state = State.IDLE
         self.cancel_start = threading.Event()
         self.tick_count = 0
+        self.tray_hint_shown = False
 
         self._build_ui()
+        self.tray = self._create_tray()
         self._render_state("Đang tắt", COLOR_IDLE)
-        root.protocol("WM_DELETE_WINDOW", self._on_close)
+        root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        root.bind("<Unmap>", self._on_unmap)
         root.after(UI_TICK_MS, self._tick)
         self.start()
 
@@ -85,7 +92,9 @@ class App:
         self.lbl_state.pack(fill="x", **pad)
         ttk.Label(main, foreground=COLOR_IDLE, wraplength=420, justify="left",
                   text="Chỉ kết nối tới Steam được xử lý. Game và mọi app khác đi mạng bình thường, "
-                       "không qua VPN nên không tăng ping.").pack(fill="x", padx=12)
+                       "không qua VPN nên không tăng ping.\n"
+                       "Đóng/thu nhỏ cửa sổ thì app vẫn chạy ngầm ở khay hệ thống; "
+                       "chuột phải biểu tượng → Thoát để tắt hẳn.").pack(fill="x", padx=12)
 
         buttons = ttk.Frame(main)
         buttons.pack(fill="x", **pad)
@@ -104,7 +113,40 @@ class App:
         scroll.pack(side="right", fill="y")
         self.txt_log.pack(side="left", fill="both", expand=True)
 
+    def _create_tray(self) -> pystray.Icon:
+        """Tray callbacks run on pystray's thread, so they only post events for the Tk loop."""
+        icon_path = BASE_DIR / "app_icon.ico"
+        image = Image.open(icon_path) if icon_path.is_file() else Image.new("RGB", (64, 64), COLOR_OK)
+        post = lambda action: lambda *_: self.events.put(("tray", action))
+        menu = pystray.Menu(
+            pystray.MenuItem("Mở cửa sổ", post("show"), default=True),
+            pystray.MenuItem("Mở Steam", post("steam")),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Thoát", post("quit")),
+        )
+        tray = pystray.Icon("SteamUnblock", image, APP_TITLE, menu)
+        tray.run_detached()
+        return tray
+
+    def hide_to_tray(self) -> None:
+        self.root.withdraw()
+        if not self.tray_hint_shown:
+            self.tray_hint_shown = True
+            self.tray.notify("Vẫn đang chạy ngầm. Bấm vào biểu tượng ở khay hệ thống để mở lại, "
+                             "chuột phải → Thoát để tắt hẳn.", APP_TITLE)
+
+    def show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _on_unmap(self, event: tk.Event) -> None:
+        # Minimize button: go to the tray instead of the taskbar.
+        if event.widget is self.root and self.root.state() == "iconic":
+            self.hide_to_tray()
+
     def _render_state(self, text: str, color: str) -> None:
+        self.tray.title = f"{APP_TITLE}: {text}"
         self.lbl_state.configure(text=text, fg=color)
         self.btn_start.state(["!disabled"] if self.state is State.IDLE else ["disabled"])
         self.btn_steam.state(["!disabled"] if self.state is State.ON else ["disabled"])
@@ -202,12 +244,15 @@ class App:
             tail = self.singbox.log_tail()
             self.log(f"sing-box dừng đột ngột.\n{tail}" if tail else "sing-box dừng đột ngột.")
             self._shutdown("Bị tắt do lỗi — bấm Bật để thử lại.", COLOR_ERR)
+            self.tray.notify("Mở khoá Steam bị tắt do lỗi. Mở cửa sổ để bật lại.", APP_TITLE)
         self.root.after(UI_TICK_MS, self._tick)
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
         if kind == "log":
             self.log(event[1])
+        elif kind == "tray":
+            {"show": self.show_window, "steam": self.launch_steam, "quit": self._quit}[event[1]]()
         elif kind == "started":
             self.state = State.ON
             self._render_state("Đã mở khoá Steam ✓", COLOR_OK)
@@ -222,10 +267,11 @@ class App:
             self._render_state(reason, color)
             self.log(reason)
 
-    def _on_close(self) -> None:
+    def _quit(self) -> None:
         self.cancel_start.set()
         # Hide first: stopping sing-box can take a few seconds and the window must not look frozen.
         self.root.withdraw()
+        self.tray.stop()
         self.root.update_idletasks()
         self.singbox.stop()
         flush_dns_cache()
