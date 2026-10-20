@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/
+*.spec
+settings.json
+*.conf
+*.log
+core/runtime.json
+core/runtime.tmp
+core/steam-runtime.json
+core/steam-runtime.tmp
