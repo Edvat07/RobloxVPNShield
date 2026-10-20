@@ -87,6 +87,43 @@ _shell32.ShellExecuteW.argtypes = (wintypes.HWND, wintypes.LPCWSTR, wintypes.LPC
 _shell32.ShellExecuteW.restype = wintypes.HINSTANCE
 
 
+_SYNCHRONIZE = 0x00100000
+_kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+_kernel32.CreateMutexW.restype = wintypes.HANDLE
+_kernel32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+_kernel32.OpenMutexW.restype = wintypes.HANDLE
+
+# Roblox Shield and Steam Unblock both create a strict-route TUN and must never run one at the same time.
+# Each holds its mutex while its TUN may be up; Windows drops it when the process exits or crashes.
+SHIELD_TUNNEL_MUTEX = r"Global\RobloxShield.Tunnel"
+STEAM_TUNNEL_MUTEX = r"Global\SteamUnblock.Tunnel"
+
+
+class NamedMutex:
+    """A presence flag for other processes: held from acquire() until release() or process exit."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self._handle = None
+
+    def acquire(self) -> None:
+        if not self._handle:
+            self._handle = _kernel32.CreateMutexW(None, False, self.name)
+
+    def release(self) -> None:
+        handle, self._handle = self._handle, None
+        if handle:
+            _kernel32.CloseHandle(handle)
+
+
+def mutex_exists(name: str) -> bool:
+    handle = _kernel32.OpenMutexW(_SYNCHRONIZE, False, name)
+    if not handle:
+        return False
+    _kernel32.CloseHandle(handle)
+    return True
+
+
 def flush_dns_cache() -> None:
     """Drop cached (hijacked or fake) answers so apps re-resolve through the current route."""
     try:

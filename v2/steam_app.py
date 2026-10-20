@@ -26,13 +26,16 @@ import pystray
 from PIL import Image
 
 from tunnel import SingBox, build_steam_unblock_config, host_has_ipv6, probe_steam
-from winapi import KillOnCloseJob, enable_dpi_awareness, find_processes, flush_dns_cache, is_admin, relaunch_as_admin
+from winapi import (
+    SHIELD_TUNNEL_MUTEX, STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedMutex, enable_dpi_awareness, find_processes,
+    flush_dns_cache, is_admin, mutex_exists, relaunch_as_admin,
+)
 
 APP_TITLE = "Steam Unblock"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CORE_DIR = BASE_DIR / "core"
 
-ROBLOX_SHIELD_NAMES = frozenset({"robloxshield.exe"})
+SINGBOX_NAMES = frozenset({"sing-box.exe"})
 UI_TICK_MS = 250
 WATCHDOG_EVERY_TICKS = 4            # 1 s
 CONNECT_TIMEOUT_S = 20
@@ -46,6 +49,7 @@ class State(enum.Enum):
     STARTING = "starting"
     ON = "on"
     STOPPING = "stopping"
+    PAUSED = "paused"       # Roblox Shield's tunnel is up and unblocks Steam itself; resume when it goes down
 
 
 def find_steam_exe() -> Path | None:
@@ -65,6 +69,8 @@ class App:
         self.events: queue.SimpleQueue[tuple] = queue.SimpleQueue()
         self.state = State.IDLE
         self.cancel_start = threading.Event()
+        self.tunnel_flag = NamedMutex(STEAM_TUNNEL_MUTEX)
+        self.yielding = False       # stopping because Roblox Shield wants the network, not because the user asked
         self.tick_count = 0
         self.tray_hint_shown = False
 
@@ -150,7 +156,7 @@ class App:
         self.lbl_state.configure(text=text, fg=color)
         self.btn_start.state(["!disabled"] if self.state is State.IDLE else ["disabled"])
         self.btn_steam.state(["!disabled"] if self.state is State.ON else ["disabled"])
-        self.btn_stop.state(["!disabled"] if self.state in (State.STARTING, State.ON) else ["disabled"])
+        self.btn_stop.state(["!disabled"] if self.state in (State.STARTING, State.ON, State.PAUSED) else ["disabled"])
 
     def log(self, message: str) -> None:
         self.txt_log.configure(state="normal")
@@ -165,10 +171,12 @@ class App:
     def start(self) -> None:
         if self.state is not State.IDLE:
             return
-        # Both apps create a TUN with strict routing; Roblox Shield already unblocks Steam on its own.
-        if find_processes(ROBLOX_SHIELD_NAMES):
-            self.log("Roblox Shield đang chạy và đã tự mở khoá Steam, không cần bật app này.")
-            self._render_state("Đang tắt (Roblox Shield đang lo Steam)", COLOR_IDLE)
+        # Flag first, then look: Roblox Shield does the same in reverse, so at least one side always sees
+        # the other and the two TUNs are never up together.
+        self.tunnel_flag.acquire()
+        if self._other_tunnel_up():
+            self.tunnel_flag.release()
+            self._pause()
             return
         self.state = State.STARTING
         self.cancel_start.clear()
@@ -206,10 +214,42 @@ class App:
         self.events.put(("start_failed", reason))
 
     def stop(self) -> None:
+        self.yielding = False
         if self.state is State.STARTING:
             self.cancel_start.set()
         elif self.state is State.ON:
             self._shutdown("Đã tắt.", COLOR_IDLE)
+        elif self.state is State.PAUSED:
+            self.state = State.IDLE
+            self._render_state("Đã tắt.", COLOR_IDLE)
+            self.log("Đã tắt. Sẽ không tự bật lại khi Roblox Shield tắt.")
+
+    def _other_tunnel_up(self) -> bool:
+        """
+        Roblox Shield's flag, or any sing-box that is not ours. The flag alone is not enough: a sing-box that
+        outlives its owner (crash before it was bound to a job) keeps its strict-route TUN up, and starting
+        ours next to it cuts the whole machine off the network.
+        """
+        if mutex_exists(SHIELD_TUNNEL_MUTEX):
+            return True
+        return bool(set(find_processes(SINGBOX_NAMES)) - {self.singbox.pid})
+
+    def _pause(self) -> None:
+        if self.state is State.PAUSED:
+            return
+        self.yielding = False
+        self.state = State.PAUSED
+        self._render_state("Tạm nghỉ: đang có tunnel khác (Roblox Shield)", COLOR_IDLE)
+        self.log("Roblox Shield (hoặc một sing-box khác) đang chạy và tự lo Steam, app này tạm nghỉ để tránh "
+                 "xung đột. Khi nó tắt, app sẽ tự bật lại.")
+
+    def _yield_to_shield(self) -> None:
+        """Roblox Shield is connecting: take our TUN down; it waits for our flag to disappear."""
+        self.yielding = True
+        if self.state is State.STARTING:
+            self.cancel_start.set()
+        elif self.state is State.ON:
+            self._shutdown("", COLOR_IDLE)
 
     def _shutdown(self, reason: str, color: str) -> None:
         self.state = State.STOPPING
@@ -240,12 +280,33 @@ class App:
             pass
 
         self.tick_count += 1
-        if self.tick_count % WATCHDOG_EVERY_TICKS == 0 and self.state is State.ON and not self.singbox.is_alive():
+        if self.tick_count % WATCHDOG_EVERY_TICKS == 0:
+            self._watchdog()
+        self.root.after(UI_TICK_MS, self._tick)
+
+    def _watchdog(self) -> None:
+        other_up = self._other_tunnel_up()
+        if other_up and self.state in (State.STARTING, State.ON) and not self.yielding:
+            self._yield_to_shield()
+        elif not other_up and self.state is State.PAUSED:
+            self.state = State.IDLE
+            self.log("Roblox Shield đã tắt, bật lại mở khoá Steam.")
+            self.start()
+        elif self.state is State.ON and not self.singbox.is_alive():
             tail = self.singbox.log_tail()
             self.log(f"sing-box dừng đột ngột.\n{tail}" if tail else "sing-box dừng đột ngột.")
             self._shutdown("Bị tắt do lỗi — bấm Bật để thử lại.", COLOR_ERR)
             self.tray.notify("Mở khoá Steam bị tắt do lỗi. Mở cửa sổ để bật lại.", APP_TITLE)
-        self.root.after(UI_TICK_MS, self._tick)
+
+    def _on_tunnel_down(self, reason: str, color: str) -> None:
+        """sing-box is stopped and DNS flushed: drop our flag so Roblox Shield may start its TUN."""
+        self.tunnel_flag.release()
+        if self.yielding:
+            self._pause()
+            return
+        self.state = State.IDLE
+        self._render_state(reason, color)
+        self.log(reason)
 
     def _handle_event(self, event: tuple) -> None:
         kind = event[0]
@@ -258,14 +319,11 @@ class App:
             self._render_state("Đã mở khoá Steam ✓", COLOR_OK)
             self.log(f"Steam phản hồi (HTTP {event[1]}). Cứ để app chạy trong lúc dùng Steam.")
         elif kind == "start_failed":
-            self.state = State.IDLE
-            self._render_state("Chưa bật", COLOR_ERR)
-            self.log(event[1])
+            if not self.yielding:
+                self.log(event[1])
+            self._on_tunnel_down("Chưa bật", COLOR_ERR)
         elif kind == "stopped":
-            _, reason, color = event
-            self.state = State.IDLE
-            self._render_state(reason, color)
-            self.log(reason)
+            self._on_tunnel_down(event[1], event[2])
 
     def _quit(self) -> None:
         self.cancel_start.set()
@@ -275,6 +333,7 @@ class App:
         self.root.update_idletasks()
         self.singbox.stop()
         flush_dns_cache()
+        self.tunnel_flag.release()
         self.root.destroy()
 
 

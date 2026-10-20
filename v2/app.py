@@ -27,7 +27,10 @@ from tunnel import (
     HOME_COUNTRY, ROBLOX_PROCESSES, ProfileError, SingBox, build_singbox_config, host_has_ipv6, parse_wireguard_conf,
     probe_exit_location,
 )
-from winapi import KillOnCloseJob, enable_dpi_awareness, find_processes, is_admin, relaunch_as_admin, terminate_process
+from winapi import (
+    SHIELD_TUNNEL_MUTEX, STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedMutex, enable_dpi_awareness, find_processes,
+    is_admin, mutex_exists, relaunch_as_admin, terminate_process,
+)
 
 APP_TITLE = "Roblox Shield"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -40,6 +43,7 @@ ROBLOX_NAMES = frozenset(name.lower() for name in ROBLOX_PROCESSES)
 UI_TICK_MS = 250
 WATCHDOG_EVERY_TICKS = 4            # 1 s
 CONNECT_TIMEOUT_S = 25
+STEAM_YIELD_TIMEOUT_S = 15
 GEO_RECHECK_S = 60
 GEO_RETRY_S = 5
 GEO_FAIL_LIMIT = 3
@@ -96,6 +100,7 @@ class App:
 
         self.state = State.IDLE
         self.cancel_connect = threading.Event()
+        self.tunnel_flag = NamedMutex(SHIELD_TUNNEL_MUTEX)
         self.launch_after_connect = False
         self.jobbed_pids: set[int] = set()
         self.unkillable_pids: set[int] = set()
@@ -231,6 +236,8 @@ class App:
         self.state = State.CONNECTING
         self.launch_after_connect = launch_game
         self.cancel_connect.clear()
+        # Tells Steam Unblock to take its TUN down; held until our tunnel is stopped (or this process dies).
+        self.tunnel_flag.acquire()
         self._render_state("Đang kết nối VPN…", COLOR_WARN)
         self.log(f"Khởi động đường hầm tới {profile.endpoint_host}…")
         threading.Thread(target=self._connect_worker, args=(profile,), daemon=True).start()
@@ -247,6 +254,20 @@ class App:
                 return
         except OSError:
             pass  # no internet yet: the tunnel check below reports the real problem
+
+        # Two strict-route TUNs block each other's DNS. Our tunnel unblocks Steam too, so Steam Unblock
+        # steps aside and resumes on its own once we stop.
+        if mutex_exists(STEAM_TUNNEL_MUTEX):
+            self.events.put(("log", "Đang đợi Steam Unblock tạm nghỉ…"))
+            deadline = time.monotonic() + STEAM_YIELD_TIMEOUT_S
+            while mutex_exists(STEAM_TUNNEL_MUTEX):
+                if self.cancel_connect.is_set():
+                    self.events.put(("connect_failed", "Đã hủy."))
+                    return
+                if time.monotonic() >= deadline:
+                    self.events.put(("connect_failed", "Steam Unblock không chịu tắt. Hãy thoát Steam Unblock rồi thử lại."))
+                    return
+                self.cancel_connect.wait(0.25)
 
         try:
             pid = self.singbox.start(build_singbox_config(profile, self.singbox.log_path, ipv6=host_has_ipv6()))
@@ -339,12 +360,14 @@ class App:
             if self.launch_after_connect:
                 self.launch_roblox()
         elif kind == "connect_failed":
+            self.tunnel_flag.release()
             self.state = State.IDLE
             self.var_exit.set("IP ra của Roblox: —")
             self._render_state("Chưa bật bảo vệ", COLOR_ERR)
             self.log(event[1])
         elif kind == "stopped":
             _, reason, color = event
+            self.tunnel_flag.release()
             self.state = State.IDLE
             self.jobbed_pids.clear()
             self.var_exit.set("IP ra của Roblox: —")
