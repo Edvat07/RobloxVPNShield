@@ -168,7 +168,7 @@ class State(enum.Enum):
 
 def load_settings() -> dict:
     try:
-        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8-sig"))  # tolerate a BOM (Notepad, PowerShell 5.1)
     except (OSError, ValueError):
         return {}
 

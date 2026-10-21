@@ -199,7 +199,7 @@ class Guard:
 def apply_language() -> None:
     """Same language as Roblox Shield: its settings.json sits next to us."""
     try:
-        choice = json.loads((BASE_DIR / "settings.json").read_text(encoding="utf-8")).get("language")
+        choice = json.loads((BASE_DIR / "settings.json").read_text(encoding="utf-8-sig")).get("language")
     except (OSError, ValueError):
         choice = None
     i18n.set_language(choice)
