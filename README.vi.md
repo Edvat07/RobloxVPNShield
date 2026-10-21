@@ -30,6 +30,10 @@ Windows 10/11 (64-bit) · Giao diện tiếng Việt và tiếng Anh
 
 ### Hướng dẫn từng bước
 
+> **Người mới? App sẽ hướng dẫn từng bước.** Lần đầu mở app mà chưa có cấu hình, cửa sổ **Bắt đầu** sẽ hiện ra, có nút mở thẳng trang đăng ký và trang tải cấu hình của Proton. Tải file xong là app **tự nhận file trong thư mục Downloads**, không cần chọn file.
+>
+> ![Cửa sổ Bắt đầu](docs/images/vi/guide-1-waiting.png)
+
 **Bước 1. Lấy file cấu hình WireGuard từ Proton VPN (miễn phí)**
 1. Đăng ký/đăng nhập tại [account.protonvpn.com](https://account.protonvpn.com) (gói Free là đủ).
 2. Vào mục **Downloads** → kéo xuống **WireGuard configuration**.
@@ -45,7 +49,10 @@ Windows 10/11 (64-bit) · Giao diện tiếng Việt và tiếng Anh
 
 **Bước 3. Mở Roblox Shield**
 1. Mở `RobloxShield.exe`, bấm **Yes** ở hộp thoại Administrator.
-2. Dòng *Cấu hình WireGuard* hiện số máy chủ app đã tìm thấy. Nếu hiện *(chưa có)*, bấm **Thêm file .conf…** và chọn file đã tải ở Bước 1.
+2. Dòng *Cấu hình WireGuard* hiện số máy chủ app đã tìm thấy. Chưa có cấu hình thì cửa sổ **Bắt đầu** sẽ mở (mở lại bằng nút **Hướng dẫn…**): nó chờ file và hiện **✓ Đã nhận … máy chủ** ngay khi bạn tải xong. File lưu chỗ khác? Bấm **File lưu chỗ khác? Chọn file…** hoặc **Thêm file .conf…**.
+
+![Đã nhận cấu hình](docs/images/vi/guide-2-found.png)
+
 
 ![Roblox Shield chưa bật bảo vệ](docs/images/vi/shield-1-off.png)
 
@@ -75,6 +82,11 @@ Windows 10/11 (64-bit) · Giao diện tiếng Việt và tiếng Anh
 ---
 
 ## Câu hỏi thường gặp
+
+**App báo "Bạn đang mở app ngay bên trong file zip"?**
+Bạn bấm đúp file exe ngay trong file zip mà chưa giải nén, nên thiếu thư mục `core`. Chuột phải file zip → **Extract All…**, rồi mở exe trong thư mục vừa giải nén.
+
+![Mở app ngay trong file zip](docs/images/vi/zip-warning.png)
 
 **Phần mềm diệt virus báo có virus?**
 Các file exe được đóng gói bằng PyInstaller và xin quyền Administrator, nên đôi khi bị báo nhầm. Toàn bộ mã nguồn nằm trong repo này; bạn có thể tự build (xem bên dưới).

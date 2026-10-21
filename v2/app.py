@@ -31,6 +31,8 @@ from tunnel import (
 )
 import hostsblock
 import i18n
+import onboarding
+import setup_check
 from winapi import (
     SHIELD_APP_MUTEX, SHIELD_CONNECT_EVENT, SHIELD_PROTECTED_MUTEX, SHIELD_SHOW_EVENT, SHIELD_TUNNEL_MUTEX,
     STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedEvent, NamedMutex, enable_dpi_awareness, find_processes, icmp_ping_ms,
@@ -52,6 +54,8 @@ PROFILE_WARN_DAYS = 30
 ROBLOX_NAMES = frozenset(name.lower() for name in ROBLOX_PROCESSES)
 UI_TICK_MS = 250
 WATCHDOG_EVERY_TICKS = 4            # 1 s
+GUIDE_POLL_EVERY_TICKS = 8          # 2 s: look for a freshly downloaded .conf
+RELEASES_URL = "https://github.com/Edvat07/RobloxVPNShield/releases/latest"
 CONNECT_TIMEOUT_S = 25
 STEAM_YIELD_TIMEOUT_S = 15
 GEO_RECHECK_S = 60
@@ -64,6 +68,7 @@ COLOR_OK, COLOR_WARN, COLOR_ERR, COLOR_IDLE = "#1a7f37", "#9a6700", "#cf222e", "
 tr = i18n.Strings({
     "profile_label": {"vi": "Cấu hình WireGuard:", "en": "WireGuard config:"},
     "add_conf": {"vi": "Thêm file .conf…", "en": "Add .conf file…"},
+    "guide_btn": {"vi": "Hướng dẫn…", "en": "Setup guide…"},
     "exit_ip": {"vi": "IP ra của Roblox: {ip}", "en": "Roblox exit IP: {ip}"},
     "btn_connect": {"vi": "Bật bảo vệ & vào game", "en": "Protect & play"},
     "btn_roblox": {"vi": "Mở Roblox", "en": "Open Roblox"},
@@ -95,8 +100,6 @@ tr = i18n.Strings({
                      "en": "Choose a WireGuard (.conf) file downloaded from Proton VPN"},
     "all_files": {"vi": "Tất cả", "en": "All files"},
     "invalid_conf": {"vi": "File cấu hình không hợp lệ:\n{error}", "en": "Invalid config file:\n{error}"},
-    "add_conf_first": {"vi": "Hãy thêm file WireGuard (.conf) tải từ Proton VPN trước.",
-                       "en": "Add a WireGuard (.conf) file downloaded from Proton VPN first."},
     "state_off": {"vi": "Chưa bật bảo vệ", "en": "Not protected"},
     "state_connecting": {"vi": "Đang kết nối VPN…", "en": "Connecting VPN…"},
     "state_stopping": {"vi": "Đang tắt…", "en": "Stopping…"},
@@ -262,6 +265,7 @@ class App:
         self.geo_failures = 0
         self.next_geo_at = 0.0
         self.tick_count = 0
+        self.guide: onboarding.SetupGuide | None = None
 
         self._build_ui()
         self._render_state(tr("state_off"), COLOR_IDLE)
@@ -290,6 +294,7 @@ class App:
         ttk.Label(profile_row, textvariable=self.var_profile, foreground=COLOR_IDLE).pack(side="left", padx=8)
         self.btn_profile = ttk.Button(profile_row, text=tr("add_conf"), command=self._choose_profile)
         self.btn_profile.pack(side="right")
+        ttk.Button(profile_row, text=tr("guide_btn"), command=self.open_guide).pack(side="right", padx=(0, 8))
 
         self.lbl_state = tk.Label(main, font=("Segoe UI", 15, "bold"), anchor="w")
         self.lbl_state.pack(fill="x", **pad)
@@ -365,6 +370,23 @@ class App:
     def _ensure_profile(self) -> None:
         if not self._sync_profiles():
             self.log(tr("need_profile"))
+            self.root.after(300, self.open_guide)   # first run: walk the user through getting a config
+
+    # ── Getting started ───────────────────────────────────────────────────────
+    def _guide_open(self) -> bool:
+        return self.guide is not None and bool(self.guide.winfo_exists())
+
+    def open_guide(self) -> None:
+        if self._guide_open():
+            self.guide.lift()
+            return
+        self.guide = onboarding.SetupGuide(self.root, on_choose_file=self._choose_profile,
+                                           on_play=lambda: self.connect(True))
+        self._refresh_guide(self._sync_profiles())
+
+    def _refresh_guide(self, profiles: Profiles) -> None:
+        if self._guide_open():
+            self.guide.show_profiles([path.stem for path, _ in profiles])
 
     def _render_state(self, text: str, color: str) -> None:
         self.lbl_state.configure(text=text, fg=color)
@@ -386,6 +408,7 @@ class App:
 
     def _choose_profile(self) -> None:
         path = filedialog.askopenfilename(
+            parent=self.guide if self._guide_open() else self.root,
             title=tr("choose_title"),
             filetypes=[("WireGuard config", "*.conf"), (tr("all_files"), "*.*")],
         )
@@ -397,7 +420,7 @@ class App:
             messagebox.showerror(APP_TITLE, tr("invalid_conf", error=exc))
             return
         self.log(tr("server_added" if added else "server_exists", name=stored.stem))
-        self._sync_profiles()
+        self._refresh_guide(self._sync_profiles())
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def connect(self, launch_game: bool) -> None:
@@ -405,7 +428,7 @@ class App:
             return
         profiles = self._sync_profiles()
         if not profiles:
-            messagebox.showwarning(APP_TITLE, tr("add_conf_first"))
+            self.open_guide()
             return
 
         self.state = State.CONNECTING
@@ -565,6 +588,8 @@ class App:
         self.tick_count += 1
         if self.tick_count % WATCHDOG_EVERY_TICKS == 0:
             self._watchdog()
+        if self.tick_count % GUIDE_POLL_EVERY_TICKS == 0 and self._guide_open() and self.state is State.IDLE:
+            self._refresh_guide(self._sync_profiles())
         self.root.after(UI_TICK_MS, self._tick)
 
     def _handle_event(self, event: tuple) -> None:
@@ -722,7 +747,12 @@ def main() -> None:
         signal_event(SHIELD_CONNECT_EVENT if connect_now else SHIELD_SHOW_EVENT)
         return
     root = tk.Tk()
+    root.withdraw()   # hidden until the first-run check passes, so its dialogs have a parent
+    if not setup_check.ensure_ready(BASE_DIR, CORE_DIR, APP_TITLE, "RobloxShield.exe", RELEASES_URL):
+        root.destroy()
+        return
     app = App(root, settings, connect_now=connect_now)
+    root.deiconify()
     root.mainloop()
     if app.restart_requested:
         instance.release()   # or the new copy would see us and just exit

@@ -30,6 +30,10 @@ Windows 10/11 (64-bit) · UI in English and Vietnamese
 
 ### Step-by-step guide
 
+> **New here? The app walks you through it.** On the first start, if no config is found, a **Get started** window opens with buttons that take you straight to Proton's sign-up and config pages. Download the config and the app **picks it up from Downloads by itself** — no need to choose the file.
+>
+> ![Get started window](docs/images/en/guide-1-waiting.png)
+
 **Step 1. Get a WireGuard config from Proton VPN (free)**
 1. Sign up / sign in at [account.protonvpn.com](https://account.protonvpn.com) (the Free plan is enough).
 2. Go to **Downloads** → scroll to **WireGuard configuration**.
@@ -45,7 +49,10 @@ Windows 10/11 (64-bit) · UI in English and Vietnamese
 
 **Step 3. Open Roblox Shield**
 1. Open `RobloxShield.exe` and click **Yes** at the Administrator prompt.
-2. The *WireGuard config* line shows how many servers were found. If it says *(none yet)*, click **Add .conf file…** and pick the file from Step 1.
+2. The *WireGuard config* line shows how many servers were found. With no config yet, the **Get started** window opens (you can reopen it with **Setup guide…**): it waits for the file and shows **✓ Got … server(s)** as soon as your download finishes. Saved the file somewhere else? Use **Saved somewhere else? Choose file…** or **Add .conf file…**.
+
+![Config picked up](docs/images/en/guide-2-found.png)
+
 
 ![Roblox Shield before protection](docs/images/en/shield-1-off.png)
 
@@ -75,6 +82,11 @@ Windows 10/11 (64-bit) · UI in English and Vietnamese
 ---
 
 ## FAQ
+
+**"You opened the app straight from inside the zip file".**
+You double-clicked the exe inside the zip without extracting it, so the `core` folder is missing. Right-click the zip → **Extract All…**, then open the exe from the extracted folder.
+
+![Opened from inside the zip](docs/images/en/zip-warning.png)
 
 **My antivirus flags the exe.**
 The exe files are packaged with PyInstaller and ask for Administrator rights, which sometimes causes false positives. All source code is in this repo; you can build it yourself (below).
