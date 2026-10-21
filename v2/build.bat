@@ -49,6 +49,12 @@ echo [*] Dang dong goi SteamUnblock.exe...
     --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
     steam_app.py || goto :fail
 
+echo [*] Dang dong goi RobloxGuard.exe...
+%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --uac-admin --noupx ^
+    --name RobloxGuard %ICON_ARG% ^
+    --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
+    guard_app.py || goto :fail
+
 rem --- Runtime files ---------------------------------------------------------
 if not exist "%OUT%\core" mkdir "%OUT%\core"
 copy /y "%SRC_CORE%\sing-box.exe" "%OUT%\core\" >nul || goto :fail

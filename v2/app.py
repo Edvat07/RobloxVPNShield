@@ -14,30 +14,38 @@ import enum
 import json
 import os
 import queue
+import socket
 import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from tunnel import (
-    HOME_COUNTRY, ROBLOX_PROCESSES, ProfileError, SingBox, build_singbox_config, host_has_ipv6, parse_wireguard_conf,
-    probe_exit_location,
+    HOME_COUNTRY, ROBLOX_PROCESSES, ProfileError, SingBox, WireGuardProfile, build_singbox_config, host_has_ipv6,
+    parse_wireguard_conf, probe_exit_location,
 )
+import hostsblock
 from winapi import (
-    SHIELD_TUNNEL_MUTEX, STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedMutex, enable_dpi_awareness, find_processes,
-    is_admin, mutex_exists, relaunch_as_admin, terminate_process,
+    SHIELD_APP_MUTEX, SHIELD_CONNECT_EVENT, SHIELD_PROTECTED_MUTEX, SHIELD_SHOW_EVENT, SHIELD_TUNNEL_MUTEX,
+    STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedEvent, NamedMutex, enable_dpi_awareness, find_processes, icmp_ping_ms,
+    is_admin, mutex_exists, relaunch_as_admin, signal_event, terminate_process,
 )
 
 APP_TITLE = "Roblox Shield"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CORE_DIR = BASE_DIR / "core"
 SETTINGS_PATH = BASE_DIR / "settings.json"
-PROFILE_COPY = BASE_DIR / "wireguard.conf"
-PROFILE_SEARCH_DIRS = (BASE_DIR, Path.home() / "Downloads")
+PROFILES_DIR = BASE_DIR / "profiles"
+LEGACY_PROFILE = BASE_DIR / "wireguard.conf"       # single-profile copy kept by older builds
+DOWNLOADS_DIR = Path.home() / "Downloads"
+# Proton WireGuard certificates expire one year after the .conf is generated (= downloaded).
+PROFILE_LIFETIME_DAYS = 365
+PROFILE_WARN_DAYS = 30
 
 ROBLOX_NAMES = frozenset(name.lower() for name in ROBLOX_PROCESSES)
 UI_TICK_MS = 250
@@ -72,26 +80,71 @@ def save_settings(data: dict) -> None:
     os.replace(tmp, SETTINGS_PATH)
 
 
-def discover_profile() -> Path | None:
-    """Newest valid WireGuard .conf next to the app or in Downloads."""
-    candidates = [p for d in PROFILE_SEARCH_DIRS if d.is_dir() for p in d.glob("*.conf")]
-    for path in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
+Profiles = list[tuple[Path, WireGuardProfile]]
+
+
+def _server_key(profile: WireGuardProfile) -> tuple:
+    # The private key is part of it so a renewed .conf for the same server counts as new.
+    return profile.private_key, profile.peer_public_key, profile.endpoint_host, profile.endpoint_port
+
+
+def _import_dirs() -> list[Path]:
+    """App folder, Downloads and its direct subfolders (e.g. Downloads\\VPN)."""
+    subdirs = sorted(d for d in DOWNLOADS_DIR.iterdir() if d.is_dir()) if DOWNLOADS_DIR.is_dir() else []
+    return [BASE_DIR, DOWNLOADS_DIR, *subdirs]
+
+
+def profile_days_left(path: Path) -> int:
+    age_days = (time.time() - path.stat().st_mtime) / 86400
+    return int(PROFILE_LIFETIME_DAYS - age_days)
+
+
+def _valid_profiles(directory: Path) -> Profiles:
+    result: Profiles = []
+    for path in sorted(directory.glob("*.conf")) if directory.is_dir() else ():
         try:
-            parse_wireguard_conf(path)
-            return path
+            result.append((path, parse_wireguard_conf(path)))
         except (OSError, ProfileError):
             continue
-    return None
+    return result
 
 
-def find_roblox_player() -> Path | None:
+def import_profile(source: Path, name: str | None = None) -> tuple[Path, bool]:
+    """Copy a .conf into the app's store unless that server is already there. Returns (stored path, added)."""
+    profile = parse_wireguard_conf(source)
+    for path, stored in _valid_profiles(PROFILES_DIR):
+        if _server_key(stored) == _server_key(profile):
+            return path, False
+    PROFILES_DIR.mkdir(exist_ok=True)
+    target = PROFILES_DIR / (name or source.name)
+    n = 2
+    while target.exists():
+        target = PROFILES_DIR / f"{Path(name or source.name).stem}-{n}.conf"
+        n += 1
+    target.write_text(source.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    # Keep the download time: it is what the expiry countdown is based on.
+    stat = source.stat()
+    os.utime(target, (stat.st_atime, stat.st_mtime))
+    return target, True
+
+
+def endpoint_ping_ms(profile: WireGuardProfile) -> int | None:
+    try:
+        ip = socket.getaddrinfo(profile.endpoint_host, None, socket.AF_INET)[0][4][0]
+    except (OSError, IndexError):
+        return None
+    return icmp_ping_ms(ip)
+
+
+def find_roblox_exe(exe_name: str) -> Path | None:
+    """Newest install of a Roblox executable (Player and Studio live in separate version folders)."""
     versions = Path(os.environ.get("LOCALAPPDATA", "")) / "Roblox" / "Versions"
-    candidates = list(versions.glob("*/RobloxPlayerBeta.exe")) if versions.is_dir() else []
+    candidates = list(versions.glob(f"*/{exe_name}")) if versions.is_dir() else []
     return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
 
 
 class App:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, connect_now: bool = False) -> None:
         self.root = root
         self.job = KillOnCloseJob()
         self.singbox = SingBox(CORE_DIR)
@@ -101,6 +154,10 @@ class App:
         self.state = State.IDLE
         self.cancel_connect = threading.Event()
         self.tunnel_flag = NamedMutex(SHIELD_TUNNEL_MUTEX)
+        # Held only while the tunnel is verified up: Roblox Guard lets Roblox (game and website) through then.
+        self.protected_flag = NamedMutex(SHIELD_PROTECTED_MUTEX)
+        self.connect_request = NamedEvent(SHIELD_CONNECT_EVENT)
+        self.show_request = NamedEvent(SHIELD_SHOW_EVENT)
         self.launch_after_connect = False
         self.jobbed_pids: set[int] = set()
         self.unkillable_pids: set[int] = set()
@@ -114,11 +171,13 @@ class App:
         self._ensure_profile()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(UI_TICK_MS, self._tick)
+        if connect_now:
+            root.after(UI_TICK_MS, self._on_connect_request)
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         self.root.title(APP_TITLE)
-        self.root.minsize(520, 420)
+        self.root.minsize(600, 420)
         icon = BASE_DIR / "app_icon.ico"
         if icon.is_file():
             self.root.iconbitmap(default=str(icon))
@@ -130,9 +189,9 @@ class App:
         profile_row = ttk.Frame(main)
         profile_row.pack(fill="x", **pad)
         ttk.Label(profile_row, text="Cấu hình WireGuard:").pack(side="left")
-        self.var_profile = tk.StringVar(value=self._profile_label())
+        self.var_profile = tk.StringVar(value="—")
         ttk.Label(profile_row, textvariable=self.var_profile, foreground=COLOR_IDLE).pack(side="left", padx=8)
-        self.btn_profile = ttk.Button(profile_row, text="Chọn file .conf…", command=self._choose_profile)
+        self.btn_profile = ttk.Button(profile_row, text="Thêm file .conf…", command=self._choose_profile)
         self.btn_profile.pack(side="right")
 
         self.lbl_state = tk.Label(main, font=("Segoe UI", 15, "bold"), anchor="w")
@@ -145,7 +204,9 @@ class App:
         self.btn_connect = ttk.Button(buttons, text="Bật bảo vệ & vào game", command=lambda: self.connect(True))
         self.btn_connect.pack(side="left", fill="x", expand=True)
         self.btn_launch = ttk.Button(buttons, text="Mở Roblox", command=self.launch_roblox)
-        self.btn_launch.pack(side="left", fill="x", expand=True, padx=8)
+        self.btn_launch.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.btn_studio = ttk.Button(buttons, text="Mở Studio", command=self.launch_studio)
+        self.btn_studio.pack(side="left", fill="x", expand=True, padx=8)
         self.btn_stop = ttk.Button(buttons, text="Tắt bảo vệ", command=self.stop)
         self.btn_stop.pack(side="left", fill="x", expand=True)
 
@@ -157,36 +218,50 @@ class App:
         scroll.pack(side="right", fill="y")
         self.txt_log.pack(side="left", fill="both", expand=True)
 
-    def _profile_label(self) -> str:
-        if not self.settings.get("wireguard_conf"):
-            return "(chưa chọn)"
-        return self.settings.get("wireguard_source") or Path(self.settings["wireguard_conf"]).name
+    def _sync_profiles(self) -> Profiles:
+        """Pull new .conf files from the app folder and Downloads into the store; return the whole store."""
+        if LEGACY_PROFILE.is_file():
+            try:
+                import_profile(LEGACY_PROFILE, self.settings.get("wireguard_source"))
+                LEGACY_PROFILE.unlink()
+                for key in ("wireguard_conf", "wireguard_source"):
+                    self.settings.pop(key, None)
+                save_settings(self.settings)
+            except (OSError, ProfileError):
+                pass
+        for directory in _import_dirs():
+            for path, _ in _valid_profiles(directory):
+                try:
+                    if profile_days_left(path) <= 0:
+                        continue
+                    stored, added = import_profile(path)
+                except (OSError, ProfileError):
+                    continue
+                if added:
+                    self.log(f"Đã thêm máy chủ {stored.stem}.")
 
-    def _import_profile(self, source: Path):
-        """Validate and keep a private copy next to the app, so cleaning Downloads never breaks it."""
-        profile = parse_wireguard_conf(source)
-        if source.resolve() != PROFILE_COPY.resolve():
-            PROFILE_COPY.write_text(source.read_text(encoding="utf-8-sig"), encoding="utf-8")
-            self.settings["wireguard_source"] = source.name
-        self.settings["wireguard_conf"] = str(PROFILE_COPY)
-        save_settings(self.settings)
-        self.var_profile.set(self._profile_label())
-        return profile
+        profiles: Profiles = []
+        for path, profile in _valid_profiles(PROFILES_DIR):
+            days_left = profile_days_left(path)
+            if days_left <= 0:
+                path.unlink(missing_ok=True)
+                self.log(f"Cấu hình {path.stem} đã hết hạn và bị gỡ. Hãy tải file mới từ account.protonvpn.com.")
+                continue
+            if days_left <= PROFILE_WARN_DAYS:
+                self.log(f"Cấu hình {path.stem} còn {days_left} ngày nữa hết hạn — nên tải file mới từ "
+                         "account.protonvpn.com rồi bỏ vào Downloads.")
+            profiles.append((path, profile))
+        if len(profiles) > 1:
+            self.var_profile.set(f"{len(profiles)} máy chủ — tự chọn nhanh nhất")
+        else:
+            self.var_profile.set(profiles[0][0].stem if profiles else "(chưa có)")
+        return profiles
 
     def _ensure_profile(self) -> None:
-        current = Path(self.settings.get("wireguard_conf") or PROFILE_COPY)
-        source = current if current.is_file() else discover_profile()
-        if not source:
+        if not self._sync_profiles():
             self.log("Chưa có cấu hình WireGuard. Tải file .conf từ account.protonvpn.com (Downloads → "
-                     "WireGuard configuration) vào thư mục Downloads rồi mở lại app, hoặc bấm 'Chọn file .conf…'.")
-            return
-        try:
-            profile = self._import_profile(source)
-        except (OSError, ProfileError) as exc:
-            self.log(f"Cấu hình {source.name} không dùng được: {exc}")
-            return
-        if source != current:
-            self.log(f"Đã tự động dùng cấu hình {source.name} → máy chủ {profile.endpoint_host}.")
+                     "WireGuard configuration) vào thư mục Downloads, hoặc bấm 'Thêm file .conf…'. "
+                     "Có thể thêm nhiều máy chủ, app sẽ tự dùng máy chủ ping thấp nhất.")
 
     def _render_state(self, text: str, color: str) -> None:
         self.lbl_state.configure(text=text, fg=color)
@@ -194,6 +269,7 @@ class App:
         self.btn_connect.state(["!disabled"] if idle else ["disabled"])
         self.btn_profile.state(["!disabled"] if idle else ["disabled"])
         self.btn_launch.state(["!disabled"] if protected else ["disabled"])
+        self.btn_studio.state(["!disabled"] if protected else ["disabled"])
         self.btn_stop.state(["!disabled"] if self.state in (State.CONNECTING, State.PROTECTED) else ["disabled"])
 
     def log(self, message: str) -> None:
@@ -213,24 +289,20 @@ class App:
         if not path:
             return
         try:
-            profile = self._import_profile(Path(path))
+            stored, added = import_profile(Path(path))
         except (OSError, ProfileError) as exc:
             messagebox.showerror(APP_TITLE, f"File cấu hình không hợp lệ:\n{exc}")
             return
-        self.log(f"Đã chọn cấu hình: {Path(path).name} → máy chủ {profile.endpoint_host}:{profile.endpoint_port}")
+        self.log(f"Đã thêm máy chủ {stored.stem}." if added else f"Máy chủ này đã có sẵn ({stored.stem}).")
+        self._sync_profiles()
 
     # ── Actions ───────────────────────────────────────────────────────────────
     def connect(self, launch_game: bool) -> None:
         if self.state is not State.IDLE:
             return
-        path = self.settings.get("wireguard_conf", "")
-        if not path:
-            messagebox.showwarning(APP_TITLE, "Hãy chọn file WireGuard (.conf) trước.")
-            return
-        try:
-            profile = parse_wireguard_conf(path)
-        except (OSError, ProfileError) as exc:
-            messagebox.showerror(APP_TITLE, f"Không đọc được cấu hình:\n{exc}")
+        profiles = self._sync_profiles()
+        if not profiles:
+            messagebox.showwarning(APP_TITLE, "Hãy thêm file WireGuard (.conf) tải từ Proton VPN trước.")
             return
 
         self.state = State.CONNECTING
@@ -239,10 +311,34 @@ class App:
         # Tells Steam Unblock to take its TUN down; held until our tunnel is stopped (or this process dies).
         self.tunnel_flag.acquire()
         self._render_state("Đang kết nối VPN…", COLOR_WARN)
-        self.log(f"Khởi động đường hầm tới {profile.endpoint_host}…")
-        threading.Thread(target=self._connect_worker, args=(profile,), daemon=True).start()
+        self.log(f"Đang đo ping tới {len(profiles)} máy chủ…")
+        threading.Thread(target=self._connect_worker, args=(profiles,), daemon=True).start()
 
-    def _connect_worker(self, profile) -> None:
+    def _pick_fastest(self, profiles: Profiles) -> WireGuardProfile:
+        """Lowest ICMP round-trip to the VPN server; Roblox then also matches us with game servers near it."""
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            pings = list(pool.map(lambda item: endpoint_ping_ms(item[1]), profiles))
+        for (path, _), ms in zip(profiles, pings):
+            self.events.put(("log", f"  {path.stem}: {f'{ms} ms' if ms is not None else 'không phản hồi'}"))
+
+        reachable = [(ms, i) for i, ms in enumerate(pings) if ms is not None]
+        if reachable:
+            ms, best = min(reachable)
+            path, profile = profiles[best]
+            self.events.put(("profile_chosen", f"{path.stem} ({ms} ms)"))
+        else:
+            path, profile = profiles[0]
+            self.events.put(("profile_chosen", path.stem))
+            self.events.put(("log", f"Không ping được máy chủ nào, thử dùng {path.stem}."))
+        self.events.put(("log", f"Khởi động đường hầm tới {path.stem} ({profile.endpoint_host})…"))
+        return profile
+
+    def _connect_worker(self, profiles: Profiles) -> None:
+        profile = self._pick_fastest(profiles)
+        if self.cancel_connect.is_set():
+            self.events.put(("connect_failed", "Đã hủy."))
+            return
+
         # Another full-tunnel VPN (e.g. the Proton VPN app) fights our TUN for routes and its kill switch
         # can block sing-box. If traffic already leaves outside Vietnam before we start, one is active.
         try:
@@ -307,6 +403,7 @@ class App:
     def _shutdown(self, reason: str, color: str) -> None:
         """Kill Roblox first (no leak window), then stop the tunnel off the UI thread."""
         self.state = State.STOPPING
+        self.protected_flag.release()   # Roblox Guard re-blocks the website right away
         killed = self._kill_roblox()
         if killed:
             self.log(f"Đã đóng {killed} tiến trình Roblox.")
@@ -319,18 +416,39 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
 
     def launch_roblox(self) -> None:
+        self._launch("RobloxPlayerBeta.exe", "Roblox",
+                     "Hãy bấm Play trên roblox.com (trình duyệt vẫn được định tuyến qua VPN).")
+
+    def launch_studio(self) -> None:
+        self._launch("RobloxStudioBeta.exe", "Roblox Studio", "Hãy cài Roblox Studio từ create.roblox.com.")
+
+    def _launch(self, exe_name: str, label: str, hint: str) -> None:
         if self.state is not State.PROTECTED:
             return
-        exe = find_roblox_player()
+        exe = find_roblox_exe(exe_name)
         if not exe:
-            self.log("Không tìm thấy RobloxPlayerBeta.exe. Hãy bấm Play trên roblox.com (trình duyệt vẫn được định tuyến qua VPN).")
+            self.log(f"Không tìm thấy {exe_name}. {hint}")
             return
-        # explorer.exe starts Roblox with the normal (non-admin) user token.
+        # explorer.exe starts it with the normal (non-admin) user token.
         subprocess.Popen(["explorer.exe", str(exe)], close_fds=True)
-        self.log("Đang mở Roblox…")
+        self.log(f"Đang mở {label}…")
 
     def _kill_roblox(self) -> int:
         return sum(terminate_process(pid) for pid in find_processes(ROBLOX_NAMES))
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(300, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
+
+    def _on_connect_request(self) -> None:
+        """From Roblox Guard (Roblox was opened without protection) or a second launch with --connect."""
+        self._show_window()
+        if self.state is State.IDLE:
+            self.log("Roblox được mở khi chưa bật bảo vệ — đang tự bật. Xong thì bấm Play / tải lại trang.")
+            self.connect(False)
 
     # ── Event loop / watchdog ─────────────────────────────────────────────────
     def _tick(self) -> None:
@@ -339,6 +457,10 @@ class App:
                 self._handle_event(self.events.get_nowait())
         except queue.Empty:
             pass
+        if self.show_request.is_set():
+            self._show_window()
+        if self.connect_request.is_set():
+            self._on_connect_request()
 
         self.tick_count += 1
         if self.tick_count % WATCHDOG_EVERY_TICKS == 0:
@@ -349,9 +471,16 @@ class App:
         kind = event[0]
         if kind == "log":
             self.log(event[1])
+        elif kind == "profile_chosen":
+            self.var_profile.set(f"Đang dùng {event[1]}")
         elif kind == "connected":
             _, ip, country = event
             self.state = State.PROTECTED
+            self.protected_flag.acquire()
+            try:
+                hostsblock.set_blocked(False)   # Roblox Guard does it too; this covers Guard not running
+            except OSError as exc:
+                self.log(f"Cảnh báo: không gỡ được chặn web Roblox trong file hosts: {exc}")
             self.geo_failures = 0
             self.next_geo_at = time.monotonic() + GEO_RECHECK_S
             self.var_exit.set(f"IP ra của Roblox: {ip} ({country})")
@@ -458,8 +587,14 @@ def main() -> None:
             root.withdraw()
             messagebox.showerror(APP_TITLE, "Cần quyền Administrator để tạo card mạng ảo (TUN).")
         return
+    connect_now = "--connect" in sys.argv
+    instance = NamedMutex(SHIELD_APP_MUTEX)
+    if not instance.acquire():
+        # Already open: hand the request to that window instead of starting a second tunnel owner.
+        signal_event(SHIELD_CONNECT_EVENT if connect_now else SHIELD_SHOW_EVENT)
+        return
     root = tk.Tk()
-    App(root)
+    App(root, connect_now=connect_now)
     root.mainloop()
 
 

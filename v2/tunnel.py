@@ -19,6 +19,8 @@ ROBLOX_PROCESSES: tuple[str, ...] = (
     "RobloxCrashHandler.exe",
     "RobloxStudioBeta.exe",
     "RobloxStudioLauncherBeta.exe",
+    "RobloxStudioInstaller.exe",
+    "StudioMCP.exe",
 )
 ROBLOX_DOMAINS: tuple[str, ...] = ("roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import socket
 import subprocess
 import sys
 from ctypes import wintypes
@@ -97,6 +98,13 @@ _kernel32.OpenMutexW.restype = wintypes.HANDLE
 # Each holds its mutex while its TUN may be up; Windows drops it when the process exits or crashes.
 SHIELD_TUNNEL_MUTEX = r"Global\RobloxShield.Tunnel"
 STEAM_TUNNEL_MUTEX = r"Global\SteamUnblock.Tunnel"
+# Held by Roblox Shield only while the tunnel is verified up; Roblox Guard blocks Roblox whenever it is absent.
+SHIELD_PROTECTED_MUTEX = r"Global\RobloxShield.Protected"
+SHIELD_APP_MUTEX = r"Global\RobloxShield.App"
+GUARD_APP_MUTEX = r"Global\RobloxGuard.App"
+# Signals to the running Roblox Shield window (a second launch or Roblox Guard sets them).
+SHIELD_CONNECT_EVENT = r"Global\RobloxShield.Connect"
+SHIELD_SHOW_EVENT = r"Global\RobloxShield.Show"
 # Single instance for Steam Unblock: a second launch (e.g. the shortcut while it sits in the tray) shows the window.
 STEAM_APP_MUTEX = r"Global\SteamUnblock.App"
 STEAM_SHOW_EVENT = r"Global\SteamUnblock.Show"
@@ -165,12 +173,84 @@ def signal_event(name: str) -> bool:
         _kernel32.CloseHandle(handle)
 
 
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+_user32.EnumWindows.argtypes = (_WNDENUMPROC, wintypes.LPARAM)
+_user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+_user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
+_user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+
+
+def visible_window_titles() -> dict[int, str]:
+    """{hwnd: title} of every visible top-level window with a title."""
+    titles: dict[int, str] = {}
+
+    def collect(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd):
+            length = _user32.GetWindowTextLengthW(hwnd)
+            if length:
+                buf = ctypes.create_unicode_buffer(length + 1)
+                _user32.GetWindowTextW(hwnd, buf, length + 1)
+                titles[hwnd] = buf.value
+        return True
+
+    _user32.EnumWindows(_WNDENUMPROC(collect), 0)
+    return titles
+
+
 def flush_dns_cache() -> None:
     """Drop cached (hijacked or fake) answers so apps re-resolve through the current route."""
     try:
         ctypes.WinDLL("dnsapi").DnsFlushResolverCache()
     except (OSError, AttributeError):
         pass
+
+
+_iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+_iphlpapi.IcmpCreateFile.restype = wintypes.HANDLE
+_iphlpapi.IcmpCloseHandle.argtypes = (wintypes.HANDLE,)
+_iphlpapi.IcmpSendEcho.argtypes = (
+    wintypes.HANDLE, wintypes.ULONG, wintypes.LPVOID, wintypes.WORD, wintypes.LPVOID, wintypes.LPVOID,
+    wintypes.DWORD, wintypes.DWORD,
+)
+_iphlpapi.IcmpSendEcho.restype = wintypes.DWORD
+
+
+class _ICMP_ECHO_REPLY(ctypes.Structure):
+    _fields_ = [
+        ("Address", wintypes.ULONG),
+        ("Status", wintypes.ULONG),
+        ("RoundTripTime", wintypes.ULONG),
+        ("DataSize", wintypes.USHORT),
+        ("Reserved", wintypes.USHORT),
+        ("Data", wintypes.LPVOID),
+        ("Ttl", ctypes.c_ubyte),
+        ("Tos", ctypes.c_ubyte),
+        ("Flags", ctypes.c_ubyte),
+        ("OptionsSize", ctypes.c_ubyte),
+        ("OptionsData", wintypes.LPVOID),
+    ]
+
+
+def icmp_ping_ms(ipv4: str, count: int = 3, timeout_ms: int = 1000) -> int | None:
+    """Best round-trip time in ms to an IPv4 address, or None if every echo was lost."""
+    handle = _iphlpapi.IcmpCreateFile()
+    if not handle or handle == _INVALID_HANDLE_VALUE:
+        return None
+    payload = b"RobloxShield"
+    reply = ctypes.create_string_buffer(ctypes.sizeof(_ICMP_ECHO_REPLY) + len(payload) + 64)
+    # IPAddr is the address in network byte order, i.e. the raw 4 bytes read as a little-endian ULONG.
+    dest = int.from_bytes(socket.inet_aton(ipv4), "little")
+    best: int | None = None
+    try:
+        for _ in range(count):
+            if _iphlpapi.IcmpSendEcho(handle, dest, payload, len(payload), None, reply, len(reply), timeout_ms):
+                echo = _ICMP_ECHO_REPLY.from_buffer(reply)
+                if echo.Status == 0:
+                    best = echo.RoundTripTime if best is None else min(best, echo.RoundTripTime)
+    finally:
+        _iphlpapi.IcmpCloseHandle(handle)
+    return best
 
 
 def enable_dpi_awareness() -> None:
