@@ -4,12 +4,14 @@ Steam Unblock — gets past the ISP block on Steam without a VPN.
 Only connections to Steam domains pass through sing-box (fake-IP range routed into a TUN); game traffic
 never touches it, so in-game ping is unchanged. sing-box is bound to a kill-on-close Job Object: quitting or
 crashing this app removes the bypass and the TUN with it. Closing or minimizing the window only hides it to
-the system tray; "Thoát" in the tray menu quits.
+the system tray; "Thoát" in the tray menu quits. Optionally starts with Windows (logon task), either hidden in
+the tray or with the window shown.
 """
 
 from __future__ import annotations
 
 import enum
+import json
 import os
 import queue
 import subprocess
@@ -25,15 +27,20 @@ from tkinter import messagebox, ttk
 import pystray
 from PIL import Image
 
+import autostart
 from tunnel import SingBox, build_steam_unblock_config, host_has_ipv6, probe_steam
 from winapi import (
-    SHIELD_TUNNEL_MUTEX, STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedMutex, enable_dpi_awareness, find_processes,
-    flush_dns_cache, is_admin, mutex_exists, relaunch_as_admin,
+    SHIELD_TUNNEL_MUTEX, STEAM_APP_MUTEX, STEAM_SHOW_EVENT, STEAM_TUNNEL_MUTEX, KillOnCloseJob, NamedEvent,
+    NamedMutex, enable_dpi_awareness, find_processes, flush_dns_cache, is_admin, mutex_exists, relaunch_as_admin,
+    signal_event,
 )
 
 APP_TITLE = "Steam Unblock"
 BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 CORE_DIR = BASE_DIR / "core"
+SETTINGS_PATH = BASE_DIR / "steam-settings.json"
+AUTOSTART_TASK = "SteamUnblock"
+STARTUP_TRAY, STARTUP_WINDOW = "tray", "window"
 
 SINGBOX_NAMES = frozenset({"sing-box.exe"})
 UI_TICK_MS = 250
@@ -61,9 +68,24 @@ def find_steam_exe() -> Path | None:
         return None
 
 
+def load_settings() -> dict:
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data: dict) -> None:
+    tmp = SETTINGS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, SETTINGS_PATH)
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        self.show_event = NamedEvent(STEAM_SHOW_EVENT)
+        self.settings = load_settings()
         self.job = KillOnCloseJob()
         self.singbox = SingBox(CORE_DIR, name="steam-runtime", log_name="steam-unblock.log")
         self.events: queue.SimpleQueue[tuple] = queue.SimpleQueue()
@@ -77,6 +99,7 @@ class App:
         self._build_ui()
         self.tray = self._create_tray()
         self._render_state("Đang tắt", COLOR_IDLE)
+        self._sync_autostart()
         root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         root.bind("<Unmap>", self._on_unmap)
         root.after(UI_TICK_MS, self._tick)
@@ -111,6 +134,23 @@ class App:
         self.btn_stop = ttk.Button(buttons, text="Tắt", command=self.stop)
         self.btn_stop.pack(side="left", fill="x", expand=True)
 
+        startup = ttk.LabelFrame(main, text="Khởi động")
+        startup.pack(fill="x", **pad)
+        self.var_autostart = tk.BooleanVar(value=False)
+        ttk.Checkbutton(startup, text="Khởi động cùng Windows", variable=self.var_autostart,
+                        command=self._on_autostart_toggled).pack(anchor="w", padx=8, pady=(4, 0))
+        modes = ttk.Frame(startup)
+        modes.pack(fill="x", padx=28, pady=(0, 4))
+        self.var_startup_mode = tk.StringVar(value=self.settings.get("startup_mode", STARTUP_TRAY))
+        self.radio_modes = [
+            ttk.Radiobutton(modes, text="Chạy ngầm (chỉ hiện ở khay hệ thống)", value=STARTUP_TRAY,
+                            variable=self.var_startup_mode, command=self._on_startup_mode_changed),
+            ttk.Radiobutton(modes, text="Hiện cửa sổ", value=STARTUP_WINDOW,
+                            variable=self.var_startup_mode, command=self._on_startup_mode_changed),
+        ]
+        for radio in self.radio_modes:
+            radio.pack(side="left", padx=(0, 16))
+
         log_frame = ttk.LabelFrame(main, text="Nhật ký")
         log_frame.pack(fill="both", expand=True, **pad)
         self.txt_log = tk.Text(log_frame, height=8, state="disabled", wrap="word", font=("Consolas", 9), relief="flat")
@@ -133,6 +173,45 @@ class App:
         tray = pystray.Icon("SteamUnblock", image, APP_TITLE, menu)
         tray.run_detached()
         return tray
+
+    # ── Start with Windows ────────────────────────────────────────────────────
+    def _sync_autostart(self) -> None:
+        """The scheduled task is the source of truth; refresh it so a moved app folder keeps working."""
+        enabled = autostart.is_enabled(AUTOSTART_TASK)
+        if enabled:
+            try:
+                autostart.enable(AUTOSTART_TASK, APP_TITLE)
+            except OSError as exc:
+                self.log(f"Không cập nhật được tác vụ khởi động: {exc}")
+        self.var_autostart.set(enabled)
+        self._render_startup_modes()
+
+    def _render_startup_modes(self) -> None:
+        for radio in self.radio_modes:
+            radio.state(["!disabled"] if self.var_autostart.get() else ["disabled"])
+
+    def _on_autostart_toggled(self) -> None:
+        want = self.var_autostart.get()
+        try:
+            if want:
+                autostart.enable(AUTOSTART_TASK, APP_TITLE)
+            else:
+                autostart.disable(AUTOSTART_TASK)
+        except OSError as exc:
+            self.var_autostart.set(not want)
+            self.log(f"Không {'bật' if want else 'tắt'} được khởi động cùng Windows: {exc}")
+        else:
+            self.log("Đã bật khởi động cùng Windows." if want else "Đã tắt khởi động cùng Windows.")
+        self._render_startup_modes()
+
+    def _on_startup_mode_changed(self) -> None:
+        self.settings["startup_mode"] = self.var_startup_mode.get()
+        save_settings(self.settings)
+        hidden = self.settings["startup_mode"] == STARTUP_TRAY
+        self.log("Khi khởi động cùng Windows: " + ("chạy ngầm ở khay hệ thống." if hidden else "hiện cửa sổ."))
+
+    def starts_hidden(self) -> bool:
+        return self.settings.get("startup_mode", STARTUP_TRAY) == STARTUP_TRAY
 
     def hide_to_tray(self) -> None:
         self.root.withdraw()
@@ -280,6 +359,8 @@ class App:
             pass
 
         self.tick_count += 1
+        if self.show_event.is_set():
+            self.show_window()
         if self.tick_count % WATCHDOG_EVERY_TICKS == 0:
             self._watchdog()
         self.root.after(UI_TICK_MS, self._tick)
@@ -345,8 +426,14 @@ def main() -> None:
             root.withdraw()
             messagebox.showerror(APP_TITLE, "Cần quyền Administrator để tạo card mạng ảo (TUN).")
         return
+    instance = NamedMutex(STEAM_APP_MUTEX)
+    if not instance.acquire():
+        signal_event(STEAM_SHOW_EVENT)
+        return
     root = tk.Tk()
-    App(root)
+    app = App(root)
+    if autostart.AUTOSTART_ARG in sys.argv and app.starts_hidden():
+        root.withdraw()
     root.mainloop()
 
 

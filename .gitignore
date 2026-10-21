@@ -3,6 +3,7 @@ __pycache__/
 build/
 *.spec
 settings.json
+steam-settings.json
 *.conf
 *.log
 core/runtime.json

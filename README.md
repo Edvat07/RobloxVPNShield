@@ -16,6 +16,8 @@ Chỉ cho **Roblox** đi qua đường hầm WireGuard (Proton VPN), mọi app k
 > Đừng bấm Connect trong app Proton VPN cùng lúc — hai VPN sẽ tranh nhau. App sẽ báo nếu phát hiện VPN khác đang bật.
 
 ## 🎮 Steam Unblock
+**Tải về:** vào [Releases](https://github.com/Edvat07/RobloxVPNShield/releases/latest), tải `SteamUnblock-*.zip`, giải nén ra một thư mục cố định (ví dụ `C:\Apps\SteamUnblock`) rồi chạy `SteamUnblock.exe`. Giữ nguyên thư mục `core` cạnh file exe.
+
 Nhà mạng chặn Steam theo 2 lớp: DNS bị giả mạo (kể cả khi đổi sang 8.8.8.8) và DPI ngắt kết nối TLS khi đọc thấy tên miền Steam.
 `SteamUnblock.exe` vượt cả hai **mà không dùng VPN**:
 
@@ -25,6 +27,8 @@ Nhà mạng chặn Steam theo 2 lớp: DNS bị giả mạo (kể cả khi đổ
 
 Cách dùng: mở shortcut **Steam Unblock** (chấp nhận quyền Admin), đợi "Đã mở khoá Steam ✓", rồi bấm **Mở Steam**. Nếu Steam đã mở sẵn mà báo lỗi mạng, thoát hẳn Steam rồi mở lại.
 Bấm X hoặc thu nhỏ cửa sổ thì app **chạy ngầm ở khay hệ thống** (góc phải thanh Taskbar) và Steam vẫn được mở khoá. Bấm vào biểu tượng để mở lại cửa sổ, chuột phải → **Thoát** để tắt hẳn.
+
+**Khởi động cùng Windows:** tick ô trong mục *Khởi động*, rồi chọn *Chạy ngầm* (chỉ hiện ở khay) hoặc *Hiện cửa sổ*. App dùng Task Scheduler với quyền cao nhất nên lúc đăng nhập không hiện hộp thoại UAC. Mở shortcut khi app đang chạy ngầm sẽ chỉ hiện lại cửa sổ, không mở bản thứ hai.
 
 Roblox Shield cũng tự mở khoá Steam theo cách tương tự. Không chạy hai app cùng lúc: Steam Unblock sẽ tự nhường nếu thấy Roblox Shield đang chạy.
 

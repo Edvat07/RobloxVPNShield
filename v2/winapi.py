@@ -97,6 +97,12 @@ _kernel32.OpenMutexW.restype = wintypes.HANDLE
 # Each holds its mutex while its TUN may be up; Windows drops it when the process exits or crashes.
 SHIELD_TUNNEL_MUTEX = r"Global\RobloxShield.Tunnel"
 STEAM_TUNNEL_MUTEX = r"Global\SteamUnblock.Tunnel"
+# Single instance for Steam Unblock: a second launch (e.g. the shortcut while it sits in the tray) shows the window.
+STEAM_APP_MUTEX = r"Global\SteamUnblock.App"
+STEAM_SHOW_EVENT = r"Global\SteamUnblock.Show"
+
+_ERROR_ALREADY_EXISTS = 183
+_EVENT_MODIFY_STATE = 0x0002
 
 
 class NamedMutex:
@@ -106,9 +112,13 @@ class NamedMutex:
         self.name = name
         self._handle = None
 
-    def acquire(self) -> None:
-        if not self._handle:
-            self._handle = _kernel32.CreateMutexW(None, False, self.name)
+    def acquire(self) -> bool:
+        """Returns False if another process already held it (useful as a single-instance check)."""
+        if self._handle:
+            return True
+        ctypes.set_last_error(0)
+        self._handle = _kernel32.CreateMutexW(None, False, self.name)
+        return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
     def release(self) -> None:
         handle, self._handle = self._handle, None
@@ -122,6 +132,37 @@ def mutex_exists(name: str) -> bool:
         return False
     _kernel32.CloseHandle(handle)
     return True
+
+
+_kernel32.CreateEventW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR)
+_kernel32.CreateEventW.restype = wintypes.HANDLE
+_kernel32.OpenEventW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+_kernel32.OpenEventW.restype = wintypes.HANDLE
+_kernel32.SetEvent.argtypes = (wintypes.HANDLE,)
+_kernel32.SetEvent.restype = wintypes.BOOL
+_kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+_kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+
+class NamedEvent:
+    """Auto-reset event another process can set with signal_event(); poll it with is_set()."""
+
+    def __init__(self, name: str) -> None:
+        self._handle = _kernel32.CreateEventW(None, False, False, name)
+
+    def is_set(self) -> bool:
+        return bool(self._handle) and _kernel32.WaitForSingleObject(self._handle, 0) == 0
+
+
+def signal_event(name: str) -> bool:
+    """Set a NamedEvent owned by another process. False if no process has created it."""
+    handle = _kernel32.OpenEventW(_EVENT_MODIFY_STATE, False, name)
+    if not handle:
+        return False
+    try:
+        return bool(_kernel32.SetEvent(handle))
+    finally:
+        _kernel32.CloseHandle(handle)
 
 
 def flush_dns_cache() -> None:
