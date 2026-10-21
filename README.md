@@ -1,136 +1,94 @@
-# 🛡️ RobloxVPNShield
+# 🛡️ Roblox Shield
 
-Bộ công cụ mạng cho game thủ Việt Nam trên Windows 10/11 (64-bit):
+**English** · [Tiếng Việt](README.vi.md)
 
-| App | Dùng để làm gì | Cần VPN? |
-|---|---|---|
-| 🎮 **Steam Unblock** | Vào được Steam khi nhà mạng chặn, ping game không đổi | Không |
-| 🛡️ **Roblox Shield** | Chỉ cho Roblox đi qua VPN (Proton VPN miễn phí), app khác giữ mạng nhà | Có (WireGuard) |
-| 🚨 **Roblox Guard** | Chạy ngầm, chặn Roblox khi bạn quên bật Roblox Shield | Đi kèm Roblox Shield |
+Send **only Roblox** (game, Studio and the roblox.com website) through a WireGuard tunnel from Proton VPN's free plan. Every other app keeps your normal connection.
 
-**Tải về:** [Steam Unblock](https://github.com/Edvat07/RobloxVPNShield/releases/tag/v1.0.0) · [Roblox Shield + Roblox Guard](https://github.com/Edvat07/RobloxVPNShield/releases/tag/roblox-shield-v1.0.0)
+| App | What it does |
+|---|---|
+| 🛡️ **Roblox Shield** | Runs the tunnel for Roblox only, picks the fastest server, never lets Roblox fall back to your real IP |
+| 🚨 **Roblox Guard** | Runs in the background and blocks Roblox whenever you forgot to turn Roblox Shield on |
 
----
+Windows 10/11 (64-bit) · UI in English and Vietnamese
 
-## 🎮 Steam Unblock
+**Download:** [latest release](https://github.com/Edvat07/RobloxVPNShield/releases/latest)
 
-Nhà mạng chặn Steam theo **2 lớp**: DNS bị giả mạo (đổi sang 8.8.8.8 cũng không ăn thua) và thiết bị lọc (DPI) ngắt kết nối khi đọc thấy tên miền Steam. Steam Unblock vượt cả hai **mà không dùng VPN**, nên ping khi chơi game không đổi.
+> Looking for **Steam Unblock**? It now has its own repo: **[Edvat07/SteamUnblock](https://github.com/Edvat07/SteamUnblock)**.
 
-### Hướng dẫn từng bước
-
-**Bước 1. Tải và giải nén**
-1. Vào [trang tải Steam Unblock](https://github.com/Edvat07/RobloxVPNShield/releases/tag/v1.0.0), bấm vào `SteamUnblock-v1.0.0-win64.zip` để tải.
-2. Chuột phải file zip → **Extract All…** → chọn một thư mục cố định, ví dụ `C:\Apps\SteamUnblock`.
-3. Giữ nguyên thư mục `core` nằm cạnh `SteamUnblock.exe` (bên trong có `sing-box.exe` và `wintun.dll`).
-
-**Bước 2. Chạy app**
-1. Mở `SteamUnblock.exe`.
-2. Windows hỏi quyền Administrator → bấm **Yes**. App cần quyền này để tạo card mạng ảo.
-3. Đợi vài giây đến khi hiện dòng chữ xanh **"Đã mở khoá Steam ✓"**.
-
-![Steam Unblock đã mở khoá Steam](docs/images/steam-1-da-mo-khoa.png)
-
-**Bước 3. Vào Steam**
-- Bấm **Mở Steam**.
-- Nếu Steam đã mở sẵn từ trước mà vẫn báo lỗi mạng: chuột phải icon Steam ở khay → **Exit**, rồi mở lại Steam.
-
-**Bước 4 (tuỳ chọn). Chạy ngầm và khởi động cùng Windows**
-- Bấm **X** hoặc thu nhỏ: app ẩn xuống khay hệ thống (góc phải thanh Taskbar, có thể nằm trong mũi tên `^`), Steam vẫn được mở khoá.
-- Bấm icon ở khay để mở lại cửa sổ. Chuột phải icon → **Thoát** để tắt hẳn.
-- Tick **Khởi động cùng Windows**, rồi chọn:
-  - **Chạy ngầm (chỉ hiện ở khay hệ thống)**: mở máy là Steam được mở khoá luôn, không hiện cửa sổ.
-  - **Hiện cửa sổ**: mở máy thì cửa sổ app hiện lên.
-
-![Tuỳ chọn khởi động cùng Windows](docs/images/steam-2-khoi-dong.png)
-
-> Khởi động cùng Windows dùng Task Scheduler với quyền cao nhất, nên lúc đăng nhập **không** hiện hộp thoại UAC. Nếu sau này bạn chuyển thư mục app đi chỗ khác, hãy mở app một lần ở chỗ mới để nó tự cập nhật.
-
-### Cách hoạt động
-- Tên miền Steam được phân giải qua **DNS mã hoá** (DNS-over-HTTPS tới 1.1.1.1), nên nhà mạng không giả mạo được.
-- Tên miền Steam nhận một **IP ảo**. Chỉ dải IP ảo đó đi vào card mạng ảo. Ở đó gói TLS đầu tiên (ClientHello) được **chia thành nhiều TLS record** để DPI không đọc được tên miền, rồi kết nối **đi thẳng** ra mạng nhà, không qua máy chủ trung gian nào.
-- Game, voice chat và mọi app khác **không đi qua** app → ping không đổi.
-
-### Dùng cùng Roblox Shield
-Roblox Shield cũng tự mở khoá Steam theo cách tương tự. Khi Roblox Shield bật bảo vệ, Steam Unblock tự **tạm nghỉ** để hai app không tranh nhau mạng, và **tự bật lại** khi Roblox Shield tắt. Bạn không phải làm gì.
-
-![Steam Unblock tạm nghỉ khi Roblox Shield đang chạy](docs/images/steam-3-tam-nghi.png)
+![Roblox Shield protecting](docs/images/en/shield-2-protected.png)
 
 ---
 
 ## 🛡️ Roblox Shield
 
-Chỉ cho **Roblox** (game, Studio và trang web roblox.com) đi qua đường hầm WireGuard của Proton VPN. Mọi app khác vẫn dùng mạng Việt Nam bình thường.
+- **No IP leaks:** Roblox has no fallback route. If the VPN drops, Roblox goes offline instead of exposing your real IP.
+- **Kill switch:** while protection is off, every Roblox process is closed at once. Quitting or crashing the app also stops Roblox and the tunnel.
+- **Fastest server automatically:** with several configs (JP, SG, US…), the app pings them all and uses the lowest ping.
+- **Exit IP check** when connecting and every minute after.
+- Unblocks Steam too while it runs (see [Steam Unblock](https://github.com/Edvat07/SteamUnblock)).
+- No need to open the Proton VPN app.
 
-- **Không rò IP:** Roblox không có đường dự phòng. VPN rớt thì Roblox mất mạng chứ không lộ IP Việt Nam.
-- **Kill switch:** khi chưa bật bảo vệ, mọi tiến trình Roblox bị đóng ngay. Tắt hay crash app thì Roblox và đường hầm cũng tắt theo.
-- **Tự chọn máy chủ nhanh nhất:** có nhiều file cấu hình (JP, SG, US…) thì app đo ping và dùng máy chủ ping thấp nhất.
-- **Kiểm tra IP ra** lúc kết nối và mỗi phút một lần.
-- Không cần mở app Proton VPN.
+### Step-by-step guide
 
-### Hướng dẫn từng bước
+**Step 1. Get a WireGuard config from Proton VPN (free)**
+1. Sign up / sign in at [account.protonvpn.com](https://account.protonvpn.com) (the Free plan is enough).
+2. Go to **Downloads** → scroll to **WireGuard configuration**.
+3. Enter any device name, choose Platform **Windows**, pick a server (the Free plan offers a few countries such as Japan, the Netherlands, the US…) and click **Create** to download the `.conf` file.
+4. To let the app pick the fastest server, download a few configs for different countries.
+5. Leave the `.conf` files in your **Downloads** folder (or a subfolder such as `Downloads\VPN`). The app finds them on its own.
 
-**Bước 1. Lấy file cấu hình WireGuard từ Proton VPN (miễn phí)**
-1. Đăng ký/đăng nhập tại [account.protonvpn.com](https://account.protonvpn.com) (gói Free là đủ).
-2. Vào mục **Downloads** → kéo xuống **WireGuard configuration**.
-3. Đặt tên thiết bị bất kỳ, chọn Platform **Windows**, chọn một máy chủ (gói Free có một số nước như Nhật, Hà Lan, Mỹ…) rồi bấm **Create** để tải file `.conf`.
-4. Muốn app tự chọn máy chủ nhanh nhất thì tải thêm vài file cho các nước khác nhau.
-5. Để các file `.conf` trong thư mục **Downloads** (hoặc thư mục con như `Downloads\VPN`). App tự tìm thấy, không cần chọn tay.
+> ⚠️ A `.conf` file contains your **private key**. Never share it or upload it anywhere. It expires after **1 year**: the app warns you 30 days ahead; then download a new one into Downloads.
 
-> ⚠️ File `.conf` chứa **khoá riêng** của bạn. Không gửi cho ai, không đưa lên mạng. File hết hạn sau **1 năm**: app báo trước 30 ngày, khi đó tải file mới bỏ vào Downloads là xong.
+**Step 2. Download and extract**
+1. Open the [latest release](https://github.com/Edvat07/RobloxVPNShield/releases/latest) and download `RobloxShield-v*-win64.zip`.
+2. Extract it to a permanent folder, for example `C:\Apps\RobloxShield`. Keep the `core` folder next to the exe files.
 
-**Bước 2. Tải và giải nén**
-1. Vào [trang tải Roblox Shield](https://github.com/Edvat07/RobloxVPNShield/releases/tag/roblox-shield-v1.0.0), tải `RobloxShield-v1.0.0-win64.zip`.
-2. Giải nén ra một thư mục cố định, ví dụ `C:\Apps\RobloxShield`. Giữ nguyên thư mục `core` cạnh các file exe.
+**Step 3. Open Roblox Shield**
+1. Open `RobloxShield.exe` and click **Yes** at the Administrator prompt.
+2. The *WireGuard config* line shows how many servers were found. If it says *(none yet)*, click **Add .conf file…** and pick the file from Step 1.
 
-**Bước 3. Mở Roblox Shield**
-1. Mở `RobloxShield.exe`, bấm **Yes** ở hộp thoại Administrator.
-2. Dòng *Cấu hình WireGuard* hiện số máy chủ app đã tìm thấy. Nếu hiện *(chưa có)*, bấm **Thêm file .conf…** và chọn file đã tải ở Bước 1.
+![Roblox Shield before protection](docs/images/en/shield-1-off.png)
 
-![Roblox Shield chưa bật bảo vệ](docs/images/shield-1-chua-bat.png)
+**Step 4. Protect and play**
+1. Click **Protect & play**. The app pings the servers, connects to the fastest one, checks the exit IP and opens Roblox.
+2. Done when the green **"Protected — Roblox goes through …"** appears. Use **Open Roblox** / **Open Studio** to reopen the game any time.
+3. When you finish, click **Stop protection** (Roblox is closed with it).
 
-**Bước 4. Bật bảo vệ và chơi**
-1. Bấm **Bật bảo vệ & vào game**. App đo ping, kết nối máy chủ nhanh nhất, kiểm tra IP ra rồi tự mở Roblox.
-2. Khi dòng chữ xanh **"Đang bảo vệ — Roblox đi qua …"** hiện lên là xong. Dùng **Mở Roblox** / **Mở Studio** để mở lại game bất cứ lúc nào.
-3. Chơi xong bấm **Tắt bảo vệ** (Roblox sẽ bị đóng theo).
+> Do not press Connect in the Proton VPN app at the same time: two VPNs fight each other. Roblox Shield tells you if it detects another VPN.
 
-![Roblox Shield đang bảo vệ](docs/images/shield-2-dang-bao-ve.png)
-
-> Đừng bấm Connect trong app Proton VPN cùng lúc: hai VPN sẽ tranh nhau. Roblox Shield sẽ báo nếu phát hiện VPN khác đang bật.
-
----
-
-## 🚨 Roblox Guard (chống quên bật Roblox Shield)
-
-`RobloxGuard.exe` nằm cùng thư mục với Roblox Shield. Chạy **một lần** là nó tự đăng ký **khởi động cùng Windows** và chạy ngầm ở khay hệ thống:
-
-- Mở Roblox / Roblox Studio khi Shield **chưa bảo vệ** → game bị đóng ngay, Roblox Shield tự mở và bật bảo vệ. Xong thì bấm Play lại.
-- Trang web Roblox bị **chặn** (qua file `hosts` của Windows) khi Shield chưa bảo vệ, nên trình duyệt không bao giờ vào Roblox bằng IP Việt Nam. Mở trang bị chặn → Shield cũng tự bật; xong thì tải lại trang (F5).
-- Chuột phải icon ở khay:
-  - **Tạm tắt canh gác**: bỏ chặn web đến lần mở máy sau.
-  - **Gỡ khỏi khởi động cùng Windows**: tắt hẳn và không tự chạy nữa.
-
-> Một số phần mềm diệt virus có thể cảnh báo vì Roblox Guard sửa file `hosts`. App chỉ thêm/gỡ đúng một khối có đánh dấu `# >>> Roblox Guard`, không đụng các dòng khác.
+**Language:** the app follows your Windows display language; change it with the **Language** box in the window (the app offers to restart). Roblox Guard uses the same choice.
 
 ---
 
-## ❓ Câu hỏi thường gặp
+## 🚨 Roblox Guard (never forget to turn Roblox Shield on)
 
-**Phần mềm diệt virus báo có virus?**
-Các file exe được đóng gói bằng PyInstaller và xin quyền Administrator, nên đôi khi bị báo nhầm. Toàn bộ mã nguồn nằm trong repo này; bạn có thể tự build (xem bên dưới).
+`RobloxGuard.exe` sits in the same folder as Roblox Shield. Run it **once**: it registers itself to **start with Windows** and runs in the system tray.
 
-**Steam Unblock bật rồi mà Steam vẫn lỗi?**
-Thoát hẳn Steam (chuột phải icon ở khay → Exit) rồi mở lại. Nếu vẫn lỗi, bấm **Tắt** rồi **Bật** trong Steam Unblock và xem phần Nhật ký.
+- Open Roblox / Roblox Studio while Shield is **not protecting** → the game is closed right away, and Roblox Shield opens and turns protection on. Then press Play again.
+- The Roblox **website is blocked** (through the Windows `hosts` file) while Shield is not protecting, so your browser never reaches Roblox with your real IP. Opening the blocked page also starts Shield; then reload (F5).
+- Right-click the tray icon:
+  - **Pause guarding**: unblocks the website until the next restart.
+  - **Remove from Windows startup**: quits and stops starting automatically.
 
-**Gỡ app thế nào?**
-Bỏ tick *Khởi động cùng Windows* (Steam Unblock) hoặc chọn *Gỡ khỏi khởi động cùng Windows* (Roblox Guard), thoát app, rồi xoá thư mục app.
+> Some antivirus apps may warn because Roblox Guard edits the `hosts` file. It only adds/removes one block marked `# >>> Roblox Guard` and never touches other lines.
 
 ---
 
-## 🔧 Build từ mã nguồn
+## FAQ
 
-Cần Python 3.12. Đặt `sing-box.exe` và `wintun.dll` vào thư mục `core\`, rồi chạy `v2\build.bat`. Kết quả (`RobloxShield.exe`, `SteamUnblock.exe`, `RobloxGuard.exe`) nằm ở `v2\release\`.
+**My antivirus flags the exe.**
+The exe files are packaged with PyInstaller and ask for Administrator rights, which sometimes causes false positives. All source code is in this repo; you can build it yourself (below).
 
-## Giấy phép thành phần bên thứ ba
-- [sing-box](https://github.com/SagerNet/sing-box) v1.14.3: GPL-3.0-or-later. Được chạy như một chương trình riêng, dự án này không liên kết với sing-box.
-- [Wintun](https://www.wintun.net/): bản DLL đã ký, phân phối nguyên gốc.
-- Steam là thương hiệu của Valve Corporation, Roblox là thương hiệu của Roblox Corporation. Dự án này không liên kết với hai công ty đó.
+**How do I uninstall it?**
+In Roblox Guard choose *Remove from Windows startup*, close Roblox Shield, then delete the app folder.
+
+---
+
+## Build from source
+
+Requires Python 3.12. Put `sing-box.exe` and `wintun.dll` into `core\`, then run `v2\build.bat`. The results (`RobloxShield.exe`, `RobloxGuard.exe`) are in `v2\release\`.
+
+## Third-party components
+- [sing-box](https://github.com/SagerNet/sing-box) v1.14.3: GPL-3.0-or-later. Run as a separate program; this project is not affiliated with sing-box.
+- [Wintun](https://www.wintun.net/): prebuilt signed DLL, distributed unmodified.
+- Roblox is a trademark of Roblox Corporation; Proton VPN is a trademark of Proton AG. This project is not affiliated with either.

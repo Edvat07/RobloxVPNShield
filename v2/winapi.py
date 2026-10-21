@@ -105,9 +105,6 @@ GUARD_APP_MUTEX = r"Global\RobloxGuard.App"
 # Signals to the running Roblox Shield window (a second launch or Roblox Guard sets them).
 SHIELD_CONNECT_EVENT = r"Global\RobloxShield.Connect"
 SHIELD_SHOW_EVENT = r"Global\RobloxShield.Show"
-# Single instance for Steam Unblock: a second launch (e.g. the shortcut while it sits in the tray) shows the window.
-STEAM_APP_MUTEX = r"Global\SteamUnblock.App"
-STEAM_SHOW_EVENT = r"Global\SteamUnblock.Show"
 
 _ERROR_ALREADY_EXISTS = 183
 _EVENT_MODIFY_STATE = 0x0002

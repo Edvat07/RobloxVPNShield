@@ -12,6 +12,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import i18n
+
 ROBLOX_PROCESSES: tuple[str, ...] = (
     "RobloxPlayerBeta.exe",
     "RobloxPlayerLauncher.exe",
@@ -32,7 +34,6 @@ STEAM_DOMAINS: tuple[str, ...] = (
     "steam-chat.com", "steamgames.com", "steamusercontent.com", "valvesoftware.com", "akamaihd.net",
 )
 STEAM_DOH_SERVER = "1.1.1.1"
-STEAM_PROBE_URL = "https://steamcommunity.com/"
 
 GEO_PROBE_IP = "1.0.0.1"
 GEO_PROBE_URL = f"https://{GEO_PROBE_IP}/cdn-cgi/trace"
@@ -44,6 +45,16 @@ WG_DIAL_TAG = "wg-dial"
 DEFAULT_WG_DNS = "1.1.1.1"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+tr = i18n.Strings({
+    "bad_endpoint": {"vi": "Endpoint không hợp lệ: {value}", "en": "Invalid endpoint: {value}"},
+    "many_peers": {"vi": "File cấu hình có nhiều hơn 1 [Peer], chỉ hỗ trợ 1 peer.",
+                   "en": "The config has more than one [Peer]; only one peer is supported."},
+    "no_sections": {"vi": "Thiếu mục [Interface] hoặc [Peer].", "en": "Missing [Interface] or [Peer] section."},
+    "missing_field": {"vi": "Thiếu trường '{key}'.", "en": "Missing field '{key}'."},
+    "no_ipv4": {"vi": "Cấu hình không có địa chỉ IPv4, mà máy này không có IPv6.",
+                "en": "The config has no IPv4 address and this computer has no IPv6."},
+})
 
 
 class ProfileError(ValueError):
@@ -83,7 +94,7 @@ def _parse_endpoint(value: str) -> tuple[str, int]:
     else:
         host, _, port = value.rpartition(":")
     if not host or not port.isdigit():
-        raise ProfileError(f"Endpoint không hợp lệ: {value}")
+        raise ProfileError(tr("bad_endpoint", value=value))
     return host, int(port)
 
 
@@ -102,7 +113,7 @@ def parse_wireguard_conf(path: str | os.PathLike) -> WireGuardProfile:
             if name == "peer":
                 peer_count += 1
                 if peer_count > 1:
-                    raise ProfileError("File cấu hình có nhiều hơn 1 [Peer], chỉ hỗ trợ 1 peer.")
+                    raise ProfileError(tr("many_peers"))
             current = sections.setdefault(name, {})
             continue
         if current is None or "=" not in line:
@@ -112,20 +123,20 @@ def parse_wireguard_conf(path: str | os.PathLike) -> WireGuardProfile:
 
     iface, peer = sections.get("interface"), sections.get("peer")
     if not iface or not peer:
-        raise ProfileError("Thiếu mục [Interface] hoặc [Peer].")
+        raise ProfileError(tr("no_sections"))
 
     def first(sec: dict[str, list[str]], key: str, required: bool = True) -> str:
         values = sec.get(key)
         if not values:
             if required:
-                raise ProfileError(f"Thiếu trường '{key}'.")
+                raise ProfileError(tr("missing_field", key=key))
             return ""
         return values[0]
 
     host, port = _parse_endpoint(first(peer, "endpoint"))
     addresses = tuple(a if "/" in a else (f"{a}/128" if ":" in a else f"{a}/32") for a in iface.get("address", []))
     if not addresses:
-        raise ProfileError("Thiếu trường 'Address'.")
+        raise ProfileError(tr("missing_field", key="Address"))
 
     mtu = first(iface, "mtu", required=False)
     keepalive = first(peer, "persistentkeepalive", required=False)
@@ -172,7 +183,7 @@ def build_singbox_config(profile: WireGuardProfile, log_path: Path, ipv6: bool) 
     addresses = list(profile.addresses) if ipv6 else _v4_only(profile.addresses)
     allowed_ips = list(profile.allowed_ips) if ipv6 else _v4_only(profile.allowed_ips)
     if not addresses or not allowed_ips:
-        raise ProfileError("Cấu hình không có địa chỉ IPv4, mà máy này không có IPv6.")
+        raise ProfileError(tr("no_ipv4"))
 
     peer: dict = {
         "address": profile.endpoint_host,
@@ -247,61 +258,6 @@ def build_singbox_config(profile: WireGuardProfile, log_path: Path, ipv6: bool) 
     }
 
 
-STEAM_TUN_INTERFACE_NAME = "SteamUnblock"
-FAKEIP_RANGE = "198.18.0.0/15"
-
-
-def build_steam_unblock_config(log_path: Path, ipv6: bool) -> dict:
-    """
-    Steam-only bypass, no VPN. Steam domains get fake IPs, and only that fake range is routed into the TUN,
-    so every other packet (games, voice, downloads from other apps) keeps the normal route with zero overhead.
-    Inside the TUN, connections to Steam leave directly, resolved over DoH, with the ClientHello split into
-    TLS records. All other DNS queries go to the system resolver as before.
-    """
-    steam = list(STEAM_DOMAINS)
-    return {
-        "log": {"level": "warn", "timestamp": True, "output": str(log_path)},
-        "dns": {
-            "servers": [
-                {"type": "local", "tag": "dns-local"},
-                {"type": "https", "tag": "dns-doh", "server": STEAM_DOH_SERVER},
-                {"type": "fakeip", "tag": "dns-fake", "inet4_range": FAKEIP_RANGE},
-            ],
-            "rules": [
-                {"domain_suffix": steam, "query_type": ["A"], "server": "dns-fake"},
-                # AAAA would bypass the fake range: answer empty so apps use the IPv4 fake address.
-                {"domain_suffix": steam, "action": "predefined", "rcode": "NOERROR"},
-            ],
-            "final": "dns-local",
-            "strategy": "prefer_ipv4" if ipv6 else "ipv4_only",
-        },
-        "inbounds": [
-            {
-                "type": "tun",
-                "tag": "tun-in",
-                "interface_name": STEAM_TUN_INTERFACE_NAME,
-                "address": ["172.19.1.1/30"],
-                "auto_route": True,
-                "strict_route": True,
-                "route_address": [FAKEIP_RANGE],
-            }
-        ],
-        "outbounds": [{"type": "direct", "tag": "direct"}],
-        "route": {
-            "rules": [
-                {"action": "sniff"},
-                {"protocol": "dns", "action": "hijack-dns"},
-                # Must match by domain: after sniffing, the fake IP destination is rewritten to the domain.
-                # TLS only: record fragmentation corrupts plain HTTP.
-                {"domain_suffix": steam, "protocol": ["tls"], "outbound": "direct", "tls_record_fragment": True},
-            ],
-            "final": "direct",
-            "auto_detect_interface": True,
-            "default_domain_resolver": "dns-doh",
-        },
-    }
-
-
 class SingBox:
     def __init__(self, core_dir: Path, name: str = "runtime", log_name: str = "sing-box.log"):
         self.exe = core_dir / "sing-box.exe"
@@ -323,7 +279,7 @@ class SingBox:
         if self.is_alive():
             return self._proc.pid
         if not self.exe.is_file():
-            raise FileNotFoundError(f"Không tìm thấy {self.exe}")
+            raise FileNotFoundError(f"{self.exe} not found")
 
         tmp = self.config_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
@@ -335,7 +291,7 @@ class SingBox:
             capture_output=True, text=True, timeout=15, creationflags=_NO_WINDOW,
         )
         if check.returncode != 0:
-            raise RuntimeError((check.stderr or check.stdout).strip() or "sing-box check thất bại")
+            raise RuntimeError((check.stderr or check.stdout).strip() or "sing-box check failed")
 
         self._proc = subprocess.Popen(
             [str(self.exe), "run", "-c", str(self.config_path), "-D", str(self.exe.parent)],
@@ -372,10 +328,3 @@ def probe_exit_location(timeout: float = 4.0) -> tuple[str, str]:
         body = resp.read(4096).decode("ascii", errors="replace")
     data = dict(line.split("=", 1) for line in body.splitlines() if "=" in line)
     return data.get("ip", "?"), data.get("loc", "?").upper()
-
-
-def probe_steam(timeout: float = 8.0) -> int:
-    """HTTP status of a Steam page through the system resolver/route; raises OSError when blocked."""
-    req = urllib.request.Request(STEAM_PROBE_URL, headers={"User-Agent": "SteamUnblock"})
-    with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
-        return resp.status

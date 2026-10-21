@@ -43,12 +43,6 @@ if exist "%ICON%" set "ICON_ARG=--icon "%ICON%""
     --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
     app.py || goto :fail
 
-echo [*] Dang dong goi SteamUnblock.exe...
-%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --uac-admin --noupx ^
-    --name SteamUnblock %ICON_ARG% ^
-    --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
-    steam_app.py || goto :fail
-
 echo [*] Dang dong goi RobloxGuard.exe...
 %PY% -m PyInstaller --noconfirm --clean --onefile --windowed --uac-admin --noupx ^
     --name RobloxGuard %ICON_ARG% ^
@@ -64,12 +58,11 @@ if exist "%~dp0settings.json" if not exist "%OUT%\settings.json" copy /y "%~dp0s
 
 rem --- Desktop shortcut ------------------------------------------------------
 powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Roblox Shield.lnk');$s.TargetPath='%OUT%\RobloxShield.exe';$s.WorkingDirectory='%OUT%';$s.IconLocation='%OUT%\RobloxShield.exe,0';$s.Save()"
-powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Steam Unblock.lnk');$s.TargetPath='%OUT%\SteamUnblock.exe';$s.WorkingDirectory='%OUT%';$s.IconLocation='%OUT%\SteamUnblock.exe,0';$s.Save()"
 
 rmdir /s /q "%~dp0build" 2>nul
 echo.
-echo [OK] Xong! File: %OUT%\RobloxShield.exe, %OUT%\SteamUnblock.exe
-echo      Da tao shortcut "Roblox Shield" va "Steam Unblock" ngoai Desktop.
+echo [OK] Xong! File: %OUT%\RobloxShield.exe, %OUT%\RobloxGuard.exe
+echo      Da tao shortcut "Roblox Shield" ngoai Desktop.
 pause
 exit /b 0
 

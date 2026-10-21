@@ -9,6 +9,7 @@ Roblox Guard — tray-only watcher that starts with Windows and covers the momen
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -23,6 +24,7 @@ import pystray
 from PIL import Image
 
 import hostsblock
+import i18n
 from tunnel import ROBLOX_PROCESSES
 from winapi import (
     GUARD_APP_MUTEX, SHIELD_CONNECT_EVENT, SHIELD_PROTECTED_MUTEX, SHIELD_TUNNEL_MUTEX, NamedMutex,
@@ -43,6 +45,26 @@ POLL_S = 0.5
 REQUEST_COOLDOWN_S = 20
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+tr = i18n.Strings({
+    "watching": {"vi": "đang canh gác", "en": "watching"},
+    "error": {"vi": "lỗi {error}", "en": "error {error}"},
+    "open_shield": {"vi": "Mở Roblox Shield", "en": "Open Roblox Shield"},
+    "pause": {"vi": "Tạm tắt canh gác (đến lần mở máy sau)", "en": "Pause guarding (until next restart)"},
+    "uninstall": {"vi": "Gỡ khỏi khởi động cùng Windows", "en": "Remove from Windows startup"},
+    "shield_failed": {"vi": "Không mở được Roblox Shield: {error}", "en": "Could not open Roblox Shield: {error}"},
+    "closed_game": {
+        "vi": "Đã đóng Roblox vì Roblox Shield chưa bật bảo vệ. Đang bật bảo vệ — xong thì bấm Play lại.",
+        "en": "Closed Roblox because Roblox Shield is not protecting. Turning protection on — then press Play again.",
+    },
+    "blocked_page": {
+        "vi": "Trang Roblox bị chặn vì Roblox Shield chưa bật bảo vệ. Đang bật bảo vệ — xong thì tải lại trang (F5).",
+        "en": "The Roblox website is blocked because Roblox Shield is not protecting. Turning protection on — "
+              "then reload the page (F5).",
+    },
+    "hosts_failed": {"vi": "Không sửa được file hosts để chặn web Roblox: {error}",
+                     "en": "Could not edit the hosts file to block the Roblox website: {error}"},
+})
+
 
 def shield_command(*args: str) -> list[str]:
     if FROZEN:
@@ -55,7 +77,7 @@ def register_autostart() -> None:
     user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}"
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Chặn Roblox khi Roblox Shield chưa bật bảo vệ.</Description></RegistrationInfo>
+  <RegistrationInfo><Description>Blocks Roblox while Roblox Shield is not protecting.</Description></RegistrationInfo>
   <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{escape(user)}</UserId></LogonTrigger></Triggers>
   <Principals><Principal id="Author">
     <UserId>{escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel>
@@ -96,11 +118,11 @@ class Guard:
         self.hosts_error_shown = False
         icon_path = BASE_DIR / "app_icon.ico"
         image = Image.open(icon_path) if icon_path.is_file() else Image.new("RGB", (64, 64), "#1a7f37")
-        self.tray = pystray.Icon("RobloxGuard", image, f"{APP_TITLE}: đang canh gác", pystray.Menu(
-            pystray.MenuItem("Mở Roblox Shield", lambda *_: self.open_shield(connect=False), default=True),
+        self.tray = pystray.Icon("RobloxGuard", image, f"{APP_TITLE}: {tr('watching')}", pystray.Menu(
+            pystray.MenuItem(tr("open_shield"), lambda *_: self.open_shield(connect=False), default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Tạm tắt canh gác (đến lần mở máy sau)", lambda *_: self.quit(uninstall=False)),
-            pystray.MenuItem("Gỡ khỏi khởi động cùng Windows", lambda *_: self.quit(uninstall=True)),
+            pystray.MenuItem(tr("pause"), lambda *_: self.quit(uninstall=False)),
+            pystray.MenuItem(tr("uninstall"), lambda *_: self.quit(uninstall=True)),
         ))
 
     # ── Shield control ────────────────────────────────────────────────────────
@@ -112,7 +134,7 @@ class Guard:
         try:
             subprocess.Popen(shield_command(*(["--connect"] if connect else [])), cwd=BASE_DIR, close_fds=True)
         except OSError as exc:
-            self.tray.notify(f"Không mở được Roblox Shield: {exc}", APP_TITLE)
+            self.tray.notify(tr("shield_failed", error=exc), APP_TITLE)
 
     def request_protection(self, message: str) -> None:
         if time.monotonic() - self.last_request < REQUEST_COOLDOWN_S:
@@ -129,7 +151,7 @@ class Guard:
             try:
                 self.check()
             except Exception as exc:   # never let one bad poll kill the guard
-                icon.title = f"{APP_TITLE}: lỗi {exc}"
+                icon.title = f"{APP_TITLE}: {tr('error', error=exc)}"
             self.stop.wait(POLL_S)
         # Cleanup here, after the last check(), so no poll can re-add the block behind it.
         try:
@@ -151,14 +173,12 @@ class Guard:
             for pid in pids:
                 terminate_process(pid)
             if pids - self.seen_game_pids:
-                self.request_protection("Đã đóng Roblox vì Roblox Shield chưa bật bảo vệ. "
-                                        "Đang bật bảo vệ — xong thì bấm Play lại.")
+                self.request_protection(tr("closed_game"))
         self.seen_game_pids = pids
 
         tabs = {(hwnd, title) for hwnd, title in visible_window_titles().items() if BLOCKED_PAGE_TITLE.match(title)}
         if tabs - self.seen_blocked_tabs:
-            self.request_protection("Trang Roblox bị chặn vì Roblox Shield chưa bật bảo vệ. "
-                                    "Đang bật bảo vệ — xong thì tải lại trang (F5).")
+            self.request_protection(tr("blocked_page"))
         self.seen_blocked_tabs = tabs
 
     def sync_hosts(self, block: bool) -> None:
@@ -168,7 +188,7 @@ class Guard:
         except OSError as exc:
             if not self.hosts_error_shown:
                 self.hosts_error_shown = True
-                self.tray.notify(f"Không sửa được file hosts để chặn web Roblox: {exc}", APP_TITLE)
+                self.tray.notify(tr("hosts_failed", error=exc), APP_TITLE)
 
     def quit(self, uninstall: bool) -> None:
         if uninstall:
@@ -176,7 +196,17 @@ class Guard:
         self.stop.set()   # run() unblocks the website and closes the tray
 
 
+def apply_language() -> None:
+    """Same language as Roblox Shield: its settings.json sits next to us."""
+    try:
+        choice = json.loads((BASE_DIR / "settings.json").read_text(encoding="utf-8")).get("language")
+    except (OSError, ValueError):
+        choice = None
+    i18n.set_language(choice)
+
+
 def main() -> None:
+    apply_language()
     if not is_admin():
         relaunch_as_admin()
         return
