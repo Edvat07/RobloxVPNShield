@@ -65,6 +65,12 @@ Windows 10/11 (64-bit) · UI in English and Vietnamese
 
 ![Roblox Shield before protection](docs/images/en/shield-1-off.png)
 
+> **First time you open it.** Nothing else needs to be installed — no Python, no runtime: everything is inside the exe.
+>
+> If Windows shows **"Windows protected your PC"** (SmartScreen), click **More info** → **Run anyway**. It appears for any new app that is not code-signed (signing needs a paid certificate), not because the app is harmful; the full source is in this repo. You only see it once.
+>
+> On some new Windows 11 PCs, **Smart App Control** blocks unsigned apps without a *Run anyway* button. The only way around it is to turn Smart App Control off (Windows Security → App & browser control → Smart App Control settings) — your decision: it cannot be turned back on without reinstalling Windows.
+
 **Step 4. Protect and play**
 1. Click **Protect & play**. The app pings the servers, connects to the fastest one, checks the exit IP and opens Roblox.
 2. Done when the green **"Protected — Roblox goes through …"** appears. Use **Open Roblox** / **Open Studio** to reopen the game any time.

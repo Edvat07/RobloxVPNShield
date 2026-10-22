@@ -65,6 +65,12 @@ Windows 10/11 (64-bit) · Giao diện tiếng Việt và tiếng Anh
 
 ![Roblox Shield chưa bật bảo vệ](docs/images/vi/shield-1-off.png)
 
+> **Lần đầu mở app.** Không cần cài thêm gì — không cần Python hay thư viện nào: mọi thứ đã nằm sẵn trong file exe.
+>
+> Nếu Windows hiện **"Windows protected your PC"** (SmartScreen), bấm **More info** (Thông tin thêm) → **Run anyway** (Vẫn chạy). Cảnh báo này hiện với mọi app mới chưa có chữ ký số (phải mua chứng chỉ trả phí), không phải vì app độc hại; toàn bộ mã nguồn nằm trong repo này. Chỉ hiện một lần.
+>
+> Trên một số máy Windows 11 mới cài, **Smart App Control** chặn hẳn app chưa có chữ ký số, không có nút *Run anyway*. Cách duy nhất là tắt Smart App Control (Windows Security → App & browser control → Smart App Control settings) — đây là lựa chọn của bạn: sau khi tắt thì không bật lại được nếu không cài lại Windows.
+
 **Bước 4. Bật bảo vệ và chơi**
 1. Bấm **Bật bảo vệ & vào game**. App đo ping, kết nối máy chủ nhanh nhất, kiểm tra IP ra rồi tự mở Roblox.
 2. Khi dòng chữ xanh **"Đang bảo vệ — Roblox đi qua …"** hiện lên là xong. Dùng **Mở Roblox** / **Mở Studio** để mở lại game bất cứ lúc nào.
