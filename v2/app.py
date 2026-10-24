@@ -756,7 +756,9 @@ def main() -> None:
     root.mainloop()
     if app.restart_requested:
         instance.release()   # or the new copy would see us and just exit
-        subprocess.Popen(restart_command(), cwd=BASE_DIR, close_fds=True)
+        # A fresh copy must not inherit this one's PyInstaller state, or it could run from files we delete on exit.
+        env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+        subprocess.Popen(restart_command(), cwd=BASE_DIR, close_fds=True, env=env)
 
 
 if __name__ == "__main__":

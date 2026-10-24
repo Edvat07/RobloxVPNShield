@@ -132,7 +132,10 @@ class Guard:
         if connect and signal_event(SHIELD_CONNECT_EVENT):
             return
         try:
-            subprocess.Popen(shield_command(*(["--connect"] if connect else [])), cwd=BASE_DIR, close_fds=True)
+            # Shield is another frozen app: it must not pick up Guard's PyInstaller state.
+            env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+            subprocess.Popen(shield_command(*(["--connect"] if connect else [])), cwd=BASE_DIR, close_fds=True,
+                             env=env)
         except OSError as exc:
             self.tray.notify(tr("shield_failed", error=exc), APP_TITLE)
 

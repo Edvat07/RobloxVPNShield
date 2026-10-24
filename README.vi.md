@@ -54,7 +54,7 @@ Windows 10/11 (64-bit) · Giao diện tiếng Việt và tiếng Anh
 
 **Bước 2. Tải và giải nén**
 1. Vào [bản mới nhất](https://github.com/Edvat07/RobloxVPNShield/releases/latest), tải `RobloxShield-v*-win64.zip`.
-2. Giải nén ra một thư mục cố định, ví dụ `C:\Apps\RobloxShield`. Giữ nguyên thư mục `core` cạnh các file exe.
+2. Giải nén ra một thư mục cố định, ví dụ `C:\Apps\RobloxShield`. Giữ nguyên hai thư mục `_internal` và `core` cạnh các file exe (`_internal` chứa Python riêng của app). Muốn chuyển chỗ thì chuyển cả thư mục, đừng chỉ chép mỗi file exe.
 
 **Bước 3. Mở Roblox Shield**
 1. Mở `RobloxShield.exe`, bấm **Yes** ở hộp thoại Administrator.
@@ -113,7 +113,7 @@ Trong Roblox Guard chọn *Gỡ khỏi khởi động cùng Windows*, đóng Rob
 
 ## Build từ mã nguồn
 
-Cần Python 3.12. Đặt `sing-box.exe` và `wintun.dll` vào thư mục `core\`, rồi chạy `v2\build.bat`. Kết quả (`RobloxShield.exe`, `RobloxGuard.exe`) nằm ở `v2\release\`.
+Cần Python 3.12. Đặt `sing-box.exe` và `wintun.dll` vào thư mục `core\`, rồi chạy `v2\build.bat`. Kết quả (`RobloxShield.exe` và `RobloxGuard.exe`, dùng chung một thư mục `_internal`, build từ `v2\roblox_shield.spec`) nằm ở `v2\release\`; cài đặt và file cấu hình có sẵn ở đó được giữ nguyên.
 
 ## Thành phần bên thứ ba
 - [sing-box](https://github.com/SagerNet/sing-box) v1.14.3: GPL-3.0-or-later. Được chạy như một chương trình riêng, dự án này không liên kết với sing-box.

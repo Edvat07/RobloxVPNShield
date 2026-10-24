@@ -54,7 +54,7 @@ Windows 10/11 (64-bit) · UI in English and Vietnamese
 
 **Step 2. Download and extract**
 1. Open the [latest release](https://github.com/Edvat07/RobloxVPNShield/releases/latest) and download `RobloxShield-v*-win64.zip`.
-2. Extract it to a permanent folder, for example `C:\Apps\RobloxShield`. Keep the `core` folder next to the exe files.
+2. Extract it to a permanent folder, for example `C:\Apps\RobloxShield`. Keep the `_internal` and `core` folders next to the exe files (`_internal` holds the apps' own Python). Move or copy the whole folder, never an exe alone.
 
 **Step 3. Open Roblox Shield**
 1. Open `RobloxShield.exe` and click **Yes** at the Administrator prompt.
@@ -113,7 +113,7 @@ In Roblox Guard choose *Remove from Windows startup*, close Roblox Shield, then 
 
 ## Build from source
 
-Requires Python 3.12. Put `sing-box.exe` and `wintun.dll` into `core\`, then run `v2\build.bat`. The results (`RobloxShield.exe`, `RobloxGuard.exe`) are in `v2\release\`.
+Requires Python 3.12. Put `sing-box.exe` and `wintun.dll` into `core\`, then run `v2\build.bat`. The results (`RobloxShield.exe` and `RobloxGuard.exe`, sharing one `_internal` folder, built from `v2\roblox_shield.spec`) are in `v2\release\`; settings and configs already there are kept.
 
 ## Third-party components
 - [sing-box](https://github.com/SagerNet/sing-box) v1.14.3: GPL-3.0-or-later. Run as a separate program; this project is not affiliated with sing-box.

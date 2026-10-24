@@ -35,19 +35,13 @@ rem --- Ensure PyInstaller ----------------------------------------------------
 )
 
 rem --- Build -----------------------------------------------------------------
-echo [*] Dang dong goi RobloxShield.exe...
-set "ICON_ARG="
-if exist "%ICON%" set "ICON_ARG=--icon "%ICON%""
-%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --uac-admin --noupx ^
-    --name RobloxShield %ICON_ARG% ^
-    --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
-    app.py || goto :fail
+rem roblox_shield.spec builds RobloxShield.exe and RobloxGuard.exe as one folder sharing _internal.
+echo [*] Dang dong goi RobloxShield.exe va RobloxGuard.exe...
+%PY% -m PyInstaller --noconfirm --clean --distpath "%~dp0dist" --workpath "%~dp0build" roblox_shield.spec || goto :fail
 
-echo [*] Dang dong goi RobloxGuard.exe...
-%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --uac-admin --noupx ^
-    --name RobloxGuard %ICON_ARG% ^
-    --distpath "%OUT%" --workpath "%~dp0build" --specpath "%~dp0build" ^
-    guard_app.py || goto :fail
+rem PyInstaller wipes its output folder, so build into dist\ and copy over: settings and profiles\ in release\ survive.
+robocopy "%~dp0dist\RobloxShield" "%OUT%" /E /NFL /NDL /NJH /NJS >nul
+if errorlevel 8 goto :fail
 
 rem --- Runtime files ---------------------------------------------------------
 if not exist "%OUT%\core" mkdir "%OUT%\core"
@@ -59,9 +53,9 @@ if exist "%~dp0settings.json" if not exist "%OUT%\settings.json" copy /y "%~dp0s
 rem --- Desktop shortcut ------------------------------------------------------
 powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Roblox Shield.lnk');$s.TargetPath='%OUT%\RobloxShield.exe';$s.WorkingDirectory='%OUT%';$s.IconLocation='%OUT%\RobloxShield.exe,0';$s.Save()"
 
-rmdir /s /q "%~dp0build" 2>nul
+rmdir /s /q "%~dp0build" "%~dp0dist" 2>nul
 echo.
-echo [OK] Xong! File: %OUT%\RobloxShield.exe, %OUT%\RobloxGuard.exe
+echo [OK] Xong! File: %OUT%\RobloxShield.exe, %OUT%\RobloxGuard.exe (giu thu muc _internal va core canh exe)
 echo      Da tao shortcut "Roblox Shield" ngoai Desktop.
 pause
 exit /b 0
